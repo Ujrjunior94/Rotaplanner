@@ -1,0 +1,93 @@
+{
+  "id": "/",
+  "name": "Driver Planner - Cockpit do Motorista",
+  "short_name": "DriverPlanner",
+  "description": "Seu painel pessoal para dirigir, planejar e lucrar. Cockpit inteligente para motoristas de aplicativo.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#020617",
+  "theme_color": "#10b981",
+  "lang": "pt-BR",
+  "dir": "ltr",
+  "categories": ["productivity", "finance", "business", "utilities"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Modo Direção",
+      "short_name": "Direção",
+      "description": "Abrir o cockpit ativo do motorista com hodômetro e cronômetro",
+      "url": "/?tab=driver-mode",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Planejamento Semanal",
+      "short_name": "Escala",
+      "description": "Visualizar e montar escala de trabalho semanal",
+      "url": "/?tab=planner",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Calculadora de Corridas",
+      "short_name": "Calcular",
+      "description": "Avaliar corrida Uber/99 em segundos para aceitar ou recusar",
+      "url": "/?tab=ride-analyzer",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Relatórios & Lucro Real",
+      "short_name": "Relatórios",
+      "description": "Ver faturamento, custos por km e lucro líquido",
+      "url": "/?tab=reports",
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}
