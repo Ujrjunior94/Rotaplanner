@@ -54,7 +54,8 @@ export const VehicleSpecsModal: React.FC<VehicleSpecsModalProps> = ({
         v =>
           v.make.toLowerCase().includes(q) ||
           v.model.toLowerCase().includes(q) ||
-          v.engine.toLowerCase().includes(q)
+          v.engine.toLowerCase().includes(q) ||
+          v.years.some(y => y.toString().includes(q))
       );
     }
     return getModelsByMake(selectedMake);
@@ -148,7 +149,7 @@ export const VehicleSpecsModal: React.FC<VehicleSpecsModalProps> = ({
               <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Buscar por modelo (ex: Onix Plus, HB20, Kwid, Argo, Virtus, Dolphin...)"
+                placeholder="Buscar por modelo ou ano (ex: Sandero 2013, Onix Plus, HB20, Kwid, Argo, Virtus...)"
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="w-full bg-black/40 border border-white/15 rounded-2xl pl-10 pr-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500 transition"

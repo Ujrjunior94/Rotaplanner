@@ -18,7 +18,9 @@ import {
   WifiOff,
   Share,
   PlusSquare,
+  Calculator,
 } from 'lucide-react';
+import { RecalculateRecordsModal } from './RecalculateRecordsModal';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -32,6 +34,8 @@ export const SettingsView: React.FC = () => {
     importDataJSON,
     isDemoData,
   } = useDriver();
+
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false);
 
   const {
     isInstallable,
@@ -214,8 +218,36 @@ export const SettingsView: React.FC = () => {
       <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-2xl space-y-4">
         <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-amber-400" />
-          CONTROLE DO BANCO LOCAL
+          CONTROLE DO BANCO LOCAL & FERRAMENTAS DE CÁLCULO
         </h3>
+
+        {/* CARD DESTAQUE RECÁLCULO DO VEÍCULO */}
+        <div className="bg-gradient-to-r from-emerald-950/40 to-slate-900 border border-emerald-500/30 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black shrink-0">
+              <Calculator className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-white flex items-center gap-2">
+                Recalcular Lançamentos com Dados do Veículo
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">
+                  {vehicle.avgConsumption} km/L
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400">
+                Ajusta os custos de combustível de todos os turnos passados com base no consumo e preço atual
+              </div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowRecalculateModal(true)}
+            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-4 py-2 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 transition shrink-0"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Recalcular</span>
+          </button>
+        </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button
@@ -355,6 +387,12 @@ export const SettingsView: React.FC = () => {
         </div>
         <span className="font-mono text-[11px] text-slate-500">Frosted Glass Edition</span>
       </div>
+
+      {/* MODAL RECÁLCULO DE LANÇAMENTOS */}
+      <RecalculateRecordsModal
+        isOpen={showRecalculateModal}
+        onClose={() => setShowRecalculateModal(false)}
+      />
     </div>
   );
 };

@@ -1011,6 +1011,7 @@ export const DriverVoiceModal: React.FC<DriverVoiceModalProps> = ({
             'Gastei 35 de almoço',
             'Quanto ganhei hoje?',
             'Quanto custa cada km?',
+            'Recalcular lançamentos do veículo',
             'Começar expediente',
             'Cria minha escala da próxima semana',
           ].map((prompt, i) => (

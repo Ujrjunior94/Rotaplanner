@@ -21,9 +21,12 @@ import {
   Info,
   Calendar,
   Sparkles,
+  Calculator,
+  RefreshCw,
 } from 'lucide-react';
 import { MaintenanceCategory } from '../types';
 import { VehicleSpecsModal } from './VehicleSpecsModal';
+import { RecalculateRecordsModal } from './RecalculateRecordsModal';
 import { VehicleSpec } from '../data/vehicleDatabase';
 
 export interface VehicleCostViewProps {
@@ -45,6 +48,7 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
   const [isEditingVehicle, setIsEditingVehicle] = useState(false);
   const [showAddMaintModal, setShowAddMaintModal] = useState(false);
   const [showSpecsModal, setShowSpecsModal] = useState(false);
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false);
 
   // Form de edição do veículo
   const [make, setMake] = useState(vehicle.make);
@@ -155,6 +159,15 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
         </div>
 
         <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+          <button
+            onClick={() => setShowRecalculateModal(true)}
+            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-bold px-3.5 py-2 rounded-xl text-xs border border-emerald-500/30 flex items-center gap-1.5 transition shadow-sm"
+            title="Recalcular combustível e custos de turnos passados com as especificações atuais do veículo"
+          >
+            <Calculator className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Recalcular Lançamentos</span>
+          </button>
+
           {onOpenFuelAdvisor && (
             <button
               onClick={onOpenFuelAdvisor}
@@ -358,6 +371,35 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
         </div>
       </div>
 
+      {/* CARD RECALCULADOR DE LANÇAMENTOS DO VEÍCULO */}
+      <div className="bg-gradient-to-br from-emerald-950/40 via-slate-900 to-slate-900 border border-emerald-500/30 p-5 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-xl">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold shrink-0 border border-emerald-500/30 mt-0.5">
+            <Calculator className="w-5 h-5" />
+          </div>
+          <div>
+            <h4 className="text-sm font-black text-white flex items-center gap-2">
+              Recalcular Lançamentos com Dados Atuais do Carro
+              <span className="bg-emerald-500/20 text-emerald-300 text-[10px] font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                {vehicle.avgConsumption} km/L • R$ {profile.gasPriceReference ? profile.gasPriceReference.toFixed(2) : '5.89'}/L
+              </span>
+            </h4>
+            <p className="text-xs text-slate-300 mt-1 max-w-xl">
+              Alterou o consumo do carro ou trocou de combustível? Atualize em massa os gastos de combustível e lucros líquidos de todos os seus turnos anteriores com base no odômetro real percorrido.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowRecalculateModal(true)}
+          className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition whitespace-nowrap self-stretch sm:self-auto justify-center"
+        >
+          <RefreshCw className="w-4 h-4" />
+          <span>Abrir Recalculador</span>
+        </button>
+      </div>
+
       {/* MANUTENÇÕES & ALERTAS PREVENTIVOS (SECTION 15) */}
       <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-2xl space-y-4">
         <div className="flex items-center justify-between">
@@ -554,6 +596,12 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
         isOpen={showSpecsModal}
         onClose={() => setShowSpecsModal(false)}
         onApplySpec={handleApplySpecFromCatalog}
+      />
+
+      {/* MODAL DE RECÁLCULO DE LANÇAMENTOS DO VEÍCULO */}
+      <RecalculateRecordsModal
+        isOpen={showRecalculateModal}
+        onClose={() => setShowRecalculateModal(false)}
       />
     </div>
   );

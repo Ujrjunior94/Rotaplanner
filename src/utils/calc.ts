@@ -555,3 +555,207 @@ export const calcDailyFuelAdvisor = (
     parity,
   };
 };
+
+/**
+ * Interface para item de prévia de recálculo de lançamento
+ */
+export interface RecalculationPreviewItem {
+  sessionId: string;
+  date: string;
+  startTime: string;
+  endTime: string | null;
+  kmDriven: number;
+  startOdometer: number;
+  endOdometer: number;
+  grossEarnings: number;
+  tips: number;
+  oldFuelExpenses: number;
+  newFuelExpenses: number;
+  deltaFuel: number; // newFuelExpenses - oldFuelExpenses
+  maintenanceReserveCost: number;
+  otherExpenses: number;
+  oldNet: number;
+  newNet: number;
+  deltaNet: number; // newNet - oldNet
+  tripsCount: number;
+  notes?: string;
+}
+
+/**
+ * Resumo consolidado do recálculo de lançamentos
+ */
+export interface RecalculationSummary {
+  totalSessions: number;
+  totalKm: number;
+  avgConsumptionUsed: number;
+  fuelPriceUsed: number;
+  maintenanceRateUsed: number;
+  includeMaintenance: boolean;
+  oldTotalFuel: number;
+  newTotalFuel: number;
+  deltaTotalFuel: number;
+  totalMaintenanceReserve: number;
+  oldTotalNet: number;
+  newTotalNet: number;
+  deltaTotalNet: number;
+  oldAvgCostPerKm: number;
+  newAvgCostPerKm: number;
+  items: RecalculationPreviewItem[];
+}
+
+export interface RecalculationOptions {
+  gasPrice?: number;
+  avgConsumption?: number;
+  maintenanceRate?: number;
+  includeMaintenance?: boolean;
+  dateFilter?: 'all' | '7days' | '30days' | 'current_month' | 'last_month';
+  sessionIds?: string[];
+}
+
+/**
+ * Gera simulação e prévia do recálculo de lançamentos/expedientes utilizando os dados do veículo
+ */
+export const previewRecalculateSessions = (
+  sessions: WorkSession[],
+  vehicle: Vehicle,
+  options: RecalculationOptions = {}
+): RecalculationSummary => {
+  const avgConsumption = options.avgConsumption && options.avgConsumption > 0
+    ? options.avgConsumption
+    : vehicle.avgConsumption || 11.5;
+
+  const fuelPrice = options.gasPrice && options.gasPrice > 0
+    ? options.gasPrice
+    : 5.89;
+
+  const maintenanceRate = options.maintenanceRate !== undefined && options.maintenanceRate >= 0
+    ? options.maintenanceRate
+    : 0.15;
+
+  const includeMaintenance = !!options.includeMaintenance;
+  const dateFilter = options.dateFilter || 'all';
+
+  const now = new Date();
+  const todayStr = now.toISOString().split('T')[0];
+
+  // Filtro de data
+  const filteredSessions = sessions.filter(s => {
+    if (s.status !== 'completed') return false;
+    if (!s.startOdometer || !s.endOdometer || s.endOdometer <= s.startOdometer) return false;
+    if (options.sessionIds && options.sessionIds.length > 0 && !options.sessionIds.includes(s.id)) return false;
+
+    if (dateFilter === 'all') return true;
+
+    const sessionDate = new Date(s.startTime);
+    const diffMs = now.getTime() - sessionDate.getTime();
+    const diffDays = diffMs / (1000 * 3600 * 24);
+
+    if (dateFilter === '7days') return diffDays <= 7;
+    if (dateFilter === '30days') return diffDays <= 30;
+
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth();
+
+    if (dateFilter === 'current_month') {
+      return sessionDate.getFullYear() === currentYear && sessionDate.getMonth() === currentMonth;
+    }
+
+    if (dateFilter === 'last_month') {
+      const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
+      return (
+        sessionDate.getFullYear() === prevMonthDate.getFullYear() &&
+        sessionDate.getMonth() === prevMonthDate.getMonth()
+      );
+    }
+
+    return true;
+  });
+
+  let totalKm = 0;
+  let oldTotalFuel = 0;
+  let newTotalFuel = 0;
+  let totalMaintenanceReserve = 0;
+  let oldTotalNet = 0;
+  let newTotalNet = 0;
+
+  const items: RecalculationPreviewItem[] = filteredSessions.map(s => {
+    const startOdo = s.startOdometer || 0;
+    const endOdo = s.endOdometer || startOdo;
+    const kmDriven = Math.max(0, endOdo - startOdo);
+    
+    // Cálculo do combustível com dados do veículo
+    const litersBurned = safeDivide(kmDriven, avgConsumption);
+    const newFuelExpenses = Math.round(litersBurned * fuelPrice * 100) / 100;
+    const oldFuelExpenses = Math.round((s.fuelExpenses || 0) * 100) / 100;
+    const deltaFuel = Math.round((newFuelExpenses - oldFuelExpenses) * 100) / 100;
+
+    const maintenanceReserveCost = Math.round(kmDriven * maintenanceRate * 100) / 100;
+
+    const gross = s.grossEarnings || 0;
+    const tips = s.tips || 0;
+    const totalGross = gross + tips;
+    const otherExp = s.otherExpenses || 0;
+
+    const oldExpenses = oldFuelExpenses + otherExp;
+    const oldNet = Math.round((totalGross - oldExpenses) * 100) / 100;
+
+    const newEffectiveExpenses = newFuelExpenses + otherExp + (includeMaintenance ? maintenanceReserveCost : 0);
+    const newNet = Math.round((totalGross - newEffectiveExpenses) * 100) / 100;
+    const deltaNet = Math.round((newNet - oldNet) * 100) / 100;
+
+    totalKm += kmDriven;
+    oldTotalFuel += oldFuelExpenses;
+    newTotalFuel += newFuelExpenses;
+    totalMaintenanceReserve += maintenanceReserveCost;
+    oldTotalNet += oldNet;
+    newTotalNet += newNet;
+
+    return {
+      sessionId: s.id,
+      date: s.startTime.split('T')[0],
+      startTime: s.startTime,
+      endTime: s.endTime,
+      kmDriven,
+      startOdometer: startOdo,
+      endOdometer: endOdo,
+      grossEarnings: gross,
+      tips,
+      oldFuelExpenses,
+      newFuelExpenses,
+      deltaFuel,
+      maintenanceReserveCost,
+      otherExpenses: otherExp,
+      oldNet,
+      newNet,
+      deltaNet,
+      tripsCount: s.tripsCount || 1,
+      notes: s.notes,
+    };
+  });
+
+  const deltaTotalFuel = Math.round((newTotalFuel - oldTotalFuel) * 100) / 100;
+  const deltaTotalNet = Math.round((newTotalNet - oldTotalNet) * 100) / 100;
+
+  const oldAvgCostPerKm = safeDivide(oldTotalFuel, totalKm);
+  const newAvgCostPerKm = safeDivide(newTotalFuel + (includeMaintenance ? totalMaintenanceReserve : 0), totalKm);
+
+  return {
+    totalSessions: items.length,
+    totalKm: Math.round(totalKm * 10) / 10,
+    avgConsumptionUsed: avgConsumption,
+    fuelPriceUsed: fuelPrice,
+    maintenanceRateUsed: maintenanceRate,
+    includeMaintenance,
+    oldTotalFuel: Math.round(oldTotalFuel * 100) / 100,
+    newTotalFuel: Math.round(newTotalFuel * 100) / 100,
+    deltaTotalFuel,
+    totalMaintenanceReserve: Math.round(totalMaintenanceReserve * 100) / 100,
+    oldTotalNet: Math.round(oldTotalNet * 100) / 100,
+    newTotalNet: Math.round(newTotalNet * 100) / 100,
+    deltaTotalNet,
+    oldAvgCostPerKm: Math.round(oldAvgCostPerKm * 100) / 100,
+    newAvgCostPerKm: Math.round(newAvgCostPerKm * 100) / 100,
+    items,
+  };
+};
+

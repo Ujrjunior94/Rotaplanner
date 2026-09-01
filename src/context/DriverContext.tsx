@@ -14,6 +14,13 @@ import {
   DriverStrategy,
 } from '../types';
 import { defaultStrategyPresets } from '../data/defaultStrategies';
+import {
+  RecalculationOptions,
+  RecalculationSummary,
+  previewRecalculateSessions,
+  formatCurrency,
+  formatKm,
+} from '../utils/calc';
 
 interface DriverContextType {
   profile: UserProfile;
@@ -59,6 +66,7 @@ interface DriverContextType {
     platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
   }) => void;
   cancelShift: () => void;
+  recalculateSessionsWithVehicleData: (options?: RecalculationOptions) => RecalculationSummary;
   
   // Strategies
   createStrategy: (strategy: Omit<DriverStrategy, 'id' | 'createdAt'>) => DriverStrategy;
@@ -401,6 +409,85 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const cancelShift = () => {
     if (!activeSession) return;
     setSessions(prev => prev.filter(s => s.id !== activeSession.id));
+  };
+
+  const recalculateSessionsWithVehicleData = (options: RecalculationOptions = {}): RecalculationSummary => {
+    const summary = previewRecalculateSessions(sessions, vehicle, {
+      ...options,
+      gasPrice: options.gasPrice || profile.gasPriceReference || 5.89,
+      avgConsumption: options.avgConsumption || vehicle.avgConsumption || 11.5,
+    });
+
+    if (summary.items.length === 0) {
+      return summary;
+    }
+
+    const itemsMap = new Map<string, (typeof summary.items)[0]>();
+    summary.items.forEach(item => {
+      itemsMap.set(item.sessionId, item);
+    });
+
+    // 1. Atualizar sessões
+    const updatedSessions = sessions.map(s => {
+      const recalculated = itemsMap.get(s.id);
+      if (!recalculated) return s;
+
+      const newFuel = recalculated.newFuelExpenses;
+      const otherExp = s.otherExpenses || 0;
+      const maintCost = options.includeMaintenance ? recalculated.maintenanceReserveCost : 0;
+
+      return {
+        ...s,
+        fuelExpenses: newFuel,
+        otherExpenses: options.includeMaintenance ? otherExp + maintCost : otherExp,
+        notes: s.notes
+          ? (s.notes.includes('[Recalculado') ? s.notes : `${s.notes} [Recalculado ${options.avgConsumption || vehicle.avgConsumption}km/L]`)
+          : `Recalculado com consumo ${options.avgConsumption || vehicle.avgConsumption} km/L`,
+      };
+    });
+
+    setSessions(updatedSessions);
+
+    // 2. Atualizar eventos do planejador para manter realizado sincronizado
+    const datesToUpdate = new Map<string, { fuel: number; gross: number; other: number }>();
+    updatedSessions.forEach(s => {
+      const date = s.startTime.split('T')[0];
+      const existing = datesToUpdate.get(date) || { fuel: 0, gross: 0, other: 0 };
+      datesToUpdate.set(date, {
+        fuel: existing.fuel + (s.fuelExpenses || 0),
+        gross: existing.gross + (s.grossEarnings || 0) + (s.tips || 0),
+        other: existing.other + (s.otherExpenses || 0),
+      });
+    });
+
+    setPlannerEvents(prev =>
+      prev.map(p => {
+        const stats = datesToUpdate.get(p.date);
+        if (stats) {
+          return {
+            ...p,
+            realizedGross: stats.gross,
+            realizedExpenses: stats.fuel + stats.other,
+          };
+        }
+        return p;
+      })
+    );
+
+    // 3. Gerar alerta informativo no sistema
+    const todayStr = new Date().toISOString().split('T')[0];
+    const newAlert: DriverAlert = {
+      id: `alert-recalc-${Date.now()}`,
+      title: 'Lançamentos Recalculados com Sucesso',
+      message: `${summary.totalSessions} expedientes foram recalculados com base no consumo de ${summary.avgConsumptionUsed} km/L e combustível a ${formatCurrency(summary.fuelPriceUsed)}/L. Total de combustível ajustado para ${formatCurrency(summary.newTotalFuel)}.`,
+      type: 'info',
+      date: todayStr,
+      read: false,
+    };
+
+    setAlerts(prev => [newAlert, ...prev]);
+
+    return summary;
   };
 
   // Funções de Gerenciamento de Estratégias
@@ -955,6 +1042,7 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         endShift,
         addCompletedShift,
         cancelShift,
+        recalculateSessionsWithVehicleData,
         addPlannerEvent,
         updatePlannerEvent,
         deletePlannerEvent,

@@ -40,6 +40,7 @@ export type VoiceIntentType =
   | 'REQUEST_AI_ANALYSIS'
   | 'REQUEST_STRATEGY'
   | 'REQUEST_WEEKLY_PLAN'
+  | 'RECALCULATE_VEHICLE_COSTS'
   | 'AMBIGUOUS'
   | 'CONFIRM_ACTION'
   | 'CANCEL_ACTION'
@@ -698,6 +699,44 @@ export function parseVoiceCommand(
           { label: 'Nível do Tanque', value: `${advisor.currentTankPct}% (${advisor.currentLiters}L)` },
           { label: 'Autonomia Atual', value: formatKm(advisor.currentRangeKm) },
           { label: 'Veredito Hoje', value: advisor.badgeLabel },
+        ],
+      },
+    };
+  }
+
+  // RECALCULAR LANÇAMENTOS COM DADOS DO VEÍCULO
+  // "Recalcular lançamentos", "Recalcular custos", "Recalcular com dados do carro", "Recalcular combustível dos turnos"
+  if (
+    norm.includes('recalcular lancamentos') ||
+    norm.includes('recalcular lançamentos') ||
+    norm.includes('recalcular custos') ||
+    norm.includes('recalcular veiculo') ||
+    norm.includes('recalcular veiculo') ||
+    norm.includes('recalcular dados do carro') ||
+    norm.includes('recalcular dados do veiculo') ||
+    norm.includes('recalcular combustivel') ||
+    norm.includes('recalcular turnos') ||
+    norm.includes('recalcular despesas') ||
+    norm.includes('atualizar custos com base no carro')
+  ) {
+    const vehicle = driverData.vehicle;
+    const gasPrice = driverData.profile.gasPriceReference || 5.89;
+    const totalSessions = driverData.workSessions?.length || 0;
+    const speech = `Abrindo o recalculador de lançamentos. O consumo configurado do seu ${vehicle.make} ${vehicle.model} é de ${vehicle.avgConsumption} km por litro e o combustível de referência é ${formatCurrency(gasPrice)}.`;
+
+    return {
+      intent: 'RECALCULATE_VEHICLE_COSTS',
+      confidence: 0.99,
+      rawText,
+      requiresConfirmation: false,
+      speechResponse: speech,
+      data: {
+        queryAnswer: speech,
+        queryDetails: [
+          { label: 'Veículo', value: `${vehicle.make} ${vehicle.model} (${vehicle.year})` },
+          { label: 'Consumo Médio', value: `${vehicle.avgConsumption} km/L` },
+          { label: 'Preço Combustível', value: `${formatCurrency(gasPrice)}/L` },
+          { label: 'Expedientes Salvos', value: `${totalSessions} turnos` },
         ],
       },
     };

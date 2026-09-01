@@ -36,8 +36,10 @@ import {
   Eye,
   Share2,
   CheckCircle2,
+  Calculator,
 } from 'lucide-react';
 import { PlatformType } from '../types';
+import { RecalculateRecordsModal } from './RecalculateRecordsModal';
 
 export const ReportsView: React.FC = () => {
   const {
@@ -58,6 +60,7 @@ export const ReportsView: React.FC = () => {
   // Estado do Modal de PDF
   const [showPDFModal, setShowPDFModal] = useState(false);
   const [pdfModalInitialType, setPdfModalInitialType] = useState<'weekly' | 'monthly'>('monthly');
+  const [showRecalculateModal, setShowRecalculateModal] = useState(false);
 
   // Controle de offset semanal e mensal para visualização interativa
   const [weekOffset, setWeekOffset] = useState<number>(0);
@@ -177,6 +180,16 @@ export const ReportsView: React.FC = () => {
 
         {/* BOTÕES DE AÇÃO DE EXPORTAÇÃO */}
         <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+          {/* BOTÃO RECALCULAR COM DADOS DO VEÍCULO */}
+          <button
+            onClick={() => setShowRecalculateModal(true)}
+            className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 font-bold px-3 py-2.5 rounded-xl text-xs border border-emerald-500/30 flex items-center gap-1.5 active:scale-95 transition"
+            title="Recalcular combustível e custos dos turnos passados com dados do veículo"
+          >
+            <Calculator className="w-4 h-4 text-emerald-400" />
+            <span>Recalcular Lançamentos</span>
+          </button>
+
           {/* BOTÃO EMITIR PDF SEMANAL */}
           <button
             onClick={() => handleOpenPDF('weekly')}
@@ -809,6 +822,12 @@ export const ReportsView: React.FC = () => {
         isOpen={showPDFModal}
         onClose={() => setShowPDFModal(false)}
         initialType={pdfModalInitialType}
+      />
+
+      {/* MODAL DE RECÁLCULO DE LANÇAMENTOS DO VEÍCULO */}
+      <RecalculateRecordsModal
+        isOpen={showRecalculateModal}
+        onClose={() => setShowRecalculateModal(false)}
       />
     </div>
   );
