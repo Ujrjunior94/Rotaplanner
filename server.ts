@@ -11,15 +11,25 @@ const PORT = 3000;
 
 app.use(express.json());
 
-// Initialize Gemini client on the server side
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    },
-  },
-});
+// Lazy initialization for Gemini client on the server side
+let aiClient: GoogleGenAI | null = null;
+function getAIClient(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error('GEMINI_API_KEY is not configured on the server.');
+    }
+    aiClient = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+  }
+  return aiClient;
+}
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -92,6 +102,7 @@ Retorne ESTRITAMENTE um objeto JSON válido correspondente à estrutura solicita
 Transcrição do motorista a analisar:
 "${transcript}"`;
 
+    const ai = getAIClient();
     const response = await ai.models.generateContent({
       model: 'gemini-3.7-flash',
       contents: promptUser,

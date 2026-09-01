@@ -173,3 +173,71 @@ export interface RideAnalysis {
   status: 'EXCELLENT' | 'FAIR' | 'BAD';
   recommendation: string;
 }
+
+export type StrategyCategory =
+  | 'hybrid'
+  | 'weekend'
+  | 'missions'
+  | 'peak_hours'
+  | 'long_trips'
+  | 'economy'
+  | 'night_shift'
+  | 'custom';
+
+export interface StrategyWorkingWindow {
+  dayOfWeek: number; // 0=Dom, 1=Seg, ..., 6=Sab
+  dayLabel: string;
+  startTime: string;
+  endTime: string;
+  targetDailyEarnings: number;
+  focusArea: string;
+  recommendedApp: PlatformType;
+  passActive?: string;
+}
+
+export interface DriverStrategy {
+  id: string;
+  name: string;
+  tagline: string;
+  category: StrategyCategory;
+  targetWeeklyGross: number;
+  targetWeeklyHours: number;
+  targetWeeklyTrips: number;
+  primaryPlatforms: PlatformType[];
+  platformStrategy: {
+    uberRole: string;
+    ninetyNineRole: string;
+    inDriveRole?: string;
+    privateRole?: string;
+  };
+  passUsage: {
+    use99Pass: boolean;
+    pass99Type: 'time_7d' | 'time_3d' | 'time_1d' | 'earnings_300' | 'none';
+    passCost: number;
+    useUberMissions: boolean;
+    targetUberProTier: 'diamond' | 'platinum' | 'gold' | 'blue';
+  };
+  acceptanceRules: {
+    minRateKm: number; // ex: 2.20
+    minRateHour: number; // ex: 38.00
+    maxPickupDistanceKm: number; // ex: 2.5
+    maxRideDurationMin: number; // ex: 45
+    minPassengerRating: number; // ex: 4.80
+    avoidRegionsNotes?: string;
+  };
+  fuelAndMaintenancePlan: {
+    fuelChoice: string;
+    stationCashbackTip: string;
+    reserveMaintenancePerKm: number; // ex: 0.15
+  };
+  workingWindows: StrategyWorkingWindow[];
+  tacticalPlaybook: Array<{
+    title: string;
+    tip: string;
+    doText: string;
+    dontText: string;
+  }>;
+  isActive?: boolean;
+  isPreset?: boolean;
+  createdAt: string;
+}

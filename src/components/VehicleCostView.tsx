@@ -20,8 +20,11 @@ import {
   Edit2,
   Info,
   Calendar,
+  Sparkles,
 } from 'lucide-react';
 import { MaintenanceCategory } from '../types';
+import { VehicleSpecsModal } from './VehicleSpecsModal';
+import { VehicleSpec } from '../data/vehicleDatabase';
 
 export interface VehicleCostViewProps {
   onOpenFuelAdvisor?: () => void;
@@ -41,6 +44,7 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
 
   const [isEditingVehicle, setIsEditingVehicle] = useState(false);
   const [showAddMaintModal, setShowAddMaintModal] = useState(false);
+  const [showSpecsModal, setShowSpecsModal] = useState(false);
 
   // Form de edição do veículo
   const [make, setMake] = useState(vehicle.make);
@@ -57,6 +61,22 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
   const [installmentsLeft, setInstallmentsLeft] = useState(vehicle.financingInstallmentsLeft.toString());
   const [insuranceMonthly, setInsuranceMonthly] = useState(vehicle.insuranceMonthly.toString());
   const [ipvaAnnual, setIpvaAnnual] = useState(vehicle.ipvaAnnual.toString());
+
+  const handleApplySpecFromCatalog = (spec: VehicleSpec, selectedYr: number) => {
+    setMake(spec.make);
+    setModel(spec.model);
+    setYear(selectedYr.toString());
+    setAvgConsumption(spec.avgConsumption.toString());
+
+    updateVehicle({
+      make: spec.make,
+      model: spec.model,
+      year: selectedYr,
+      avgConsumption: spec.avgConsumption,
+      tankCapacity: spec.tankCapacity,
+      fuelType: spec.fuelType === 'Elétrico' ? 'Elétrico' : 'Flex',
+    });
+  };
 
   // Form de Manutenção
   const [mCategory, setMCategory] = useState<MaintenanceCategory>('Troca de Óleo');
@@ -158,9 +178,19 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
       {/* FORMULÁRIO DE EDIÇÃO DO VEÍCULO */}
       {isEditingVehicle && (
         <form onSubmit={handleSaveVehicle} className="bg-white/5 backdrop-blur-lg border border-emerald-500/30 p-5 rounded-2xl space-y-4">
-          <h3 className="text-xs font-black text-emerald-400 uppercase tracking-wider">
-            FICHA TÉCNICA E CUSTOS FIXOS DO CARRO
-          </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+            <h3 className="text-xs font-black text-emerald-400 uppercase tracking-wider">
+              FICHA TÉCNICA E CUSTOS FIXOS DO CARRO
+            </h3>
+            <button
+              type="button"
+              onClick={() => setShowSpecsModal(true)}
+              className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-400 text-slate-950 font-black text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 self-start sm:self-auto"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              Puxar Ficha de Fábrica por Modelo/Ano
+            </button>
+          </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
@@ -518,6 +548,13 @@ export const VehicleCostView: React.FC<VehicleCostViewProps> = ({ onOpenFuelAdvi
           </div>
         </div>
       )}
+
+      {/* MODAL DE CATÁLOGO TÉCNICO DO VEÍCULO */}
+      <VehicleSpecsModal
+        isOpen={showSpecsModal}
+        onClose={() => setShowSpecsModal(false)}
+        onApplySpec={handleApplySpecFromCatalog}
+      />
     </div>
   );
 };

@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useDriver } from '../context/DriverContext';
 import { ExpenseCategory, MaintenanceCategory, PlatformType } from '../types';
-import { safeDivide, formatCurrency } from '../utils/calc';
+import { safeDivide, formatCurrency, calcFuelParity } from '../utils/calc';
 import {
   DollarSign,
   Car,
@@ -10,6 +10,11 @@ import {
   Wrench,
   X,
   Check,
+  Sparkles,
+  Zap,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
 } from 'lucide-react';
 
 interface QuickAddModalProps {
@@ -32,6 +37,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 }) => {
   const {
     vehicle,
+    profile,
     activeSession,
     addEarning,
     addExpense,
@@ -55,13 +61,43 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [rideKm, setRideKm] = useState('');
   const [rideMinutes, setRideMinutes] = useState('');
 
-  // 3. ABASTECIMENTO
+  // 3. ABASTECIMENTO & CONSULTOR QUAL COMBUSTÍVEL USAR
   const [fuelStation, setFuelStation] = useState('Posto Ipiranga');
   const [fuelType, setFuelType] = useState('Gasolina Comum');
   const [fuelLiters, setFuelLiters] = useState('');
   const [fuelPricePerLiter, setFuelPricePerLiter] = useState('5.89');
   const [fuelTotal, setFuelTotal] = useState('');
   const [fuelOdo, setFuelOdo] = useState(vehicle.currentOdometer.toString());
+
+  // Preços de bomba para cálculo de paridade em tempo real
+  const [pumpGasPrice, setPumpGasPrice] = useState<string>(
+    profile.gasPriceReference ? profile.gasPriceReference.toString() : '5.89'
+  );
+  const [pumpEthPrice, setPumpEthPrice] = useState<string>(
+    profile.gasPriceReference ? (profile.gasPriceReference * 0.68).toFixed(2) : '3.99'
+  );
+  const [showPriceCompareInputs, setShowPriceCompareInputs] = useState<boolean>(false);
+
+  // Paridade calculada em tempo real
+  const parityAnalysis = useMemo(() => {
+    const gas = parseFloat(pumpGasPrice) || 5.89;
+    const eth = parseFloat(pumpEthPrice) || 3.99;
+    const isFlexVehicle = vehicle.fuelType === 'Flex' || !vehicle.fuelType;
+    return calcFuelParity(eth, gas, vehicle.avgConsumption || 12.5, isFlexVehicle);
+  }, [pumpGasPrice, pumpEthPrice, vehicle]);
+
+  // Função para aplicar recomendação com 1 clique
+  const applyRecommendedFuel = (type: 'Etanol' | 'Gasolina Comum', price: number) => {
+    setFuelType(type);
+    setFuelPricePerLiter(price.toFixed(2));
+    const litersNum = parseFloat(fuelLiters) || 0;
+    const totalNum = parseFloat(fuelTotal) || 0;
+    if (litersNum > 0) {
+      setFuelTotal((litersNum * price).toFixed(2));
+    } else if (totalNum > 0) {
+      setFuelLiters((totalNum / price).toFixed(2));
+    }
+  };
 
   // Sincronizar quando abrir com props iniciais
   React.useEffect(() => {
@@ -442,12 +478,46 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
               </div>
             </div>
 
-            {parseFloat(rideAmount) > 0 && parseFloat(rideKm) > 0 && (
-              <div className="bg-white/5 p-3 rounded-xl border border-white/10 flex justify-between text-xs font-bold text-slate-300">
-                <span>R$/km: <strong className="text-teal-400">{formatCurrency(safeDivide(parseFloat(rideAmount), parseFloat(rideKm)))}/km</strong></span>
-                <span>R$/hora: <strong className="text-teal-400">{formatCurrency(safeDivide(parseFloat(rideAmount), safeDivide(parseFloat(rideMinutes) || 1, 60)))}/h</strong></span>
-              </div>
-            )}
+            {parseFloat(rideAmount) > 0 && parseFloat(rideKm) > 0 && (() => {
+              const km = parseFloat(rideKm) || 0;
+              const gross = parseFloat(rideAmount) || 0;
+              const mins = parseFloat(rideMinutes) || 1;
+              const fuelCost = (km / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89);
+              const maintCost = km * 0.15;
+              const totalCost = fuelCost + maintCost;
+              const netProfit = gross - totalCost;
+              const netPerKm = safeDivide(netProfit, km);
+              const ratePerKm = safeDivide(gross, km);
+              const ratePerHour = safeDivide(gross, safeDivide(mins, 60));
+
+              return (
+                <div className="bg-slate-950/80 p-3 rounded-2xl border border-teal-500/30 space-y-2 text-xs">
+                  <div className="flex justify-between text-slate-300 font-bold">
+                    <span>Bruto: <strong className="text-teal-400">{formatCurrency(ratePerKm)}/km</strong> ({formatCurrency(ratePerHour)}/h)</span>
+                    <span className="text-amber-300">Custo Estimado: {formatCurrency(totalCost)}</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1 text-[11px] text-center pt-1 border-t border-white/10">
+                    <div className="bg-white/5 p-1.5 rounded-lg">
+                      <span className="text-slate-400 block text-[9px]">Combustível</span>
+                      <strong className="text-amber-300 font-mono">{formatCurrency(fuelCost)}</strong>
+                    </div>
+                    <div className="bg-white/5 p-1.5 rounded-lg">
+                      <span className="text-slate-400 block text-[9px]">Manutenção</span>
+                      <strong className="text-sky-300 font-mono">{formatCurrency(maintCost)}</strong>
+                    </div>
+                    <div className="bg-white/5 p-1.5 rounded-lg">
+                      <span className="text-slate-400 block text-[9px]">Líquido Real</span>
+                      <strong className={`font-mono ${netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                        {formatCurrency(netProfit)}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="text-[10px] text-emerald-400 font-bold text-center">
+                    Resultado Líquido: {formatCurrency(netPerKm)}/km rodado
+                  </div>
+                </div>
+              );
+            })()}
 
             <button
               type="submit"
@@ -458,21 +528,142 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
           </form>
         )}
 
-        {/* 3. ABA ABASTECIMENTO */}
+        {/* 3. ABA ABASTECIMENTO COM CONSULTOR QUAL COMBUSTÍVEL USAR */}
         {activeTab === 'fuel' && (
           <form onSubmit={handleFuelSubmit} className="space-y-3.5">
+            
+            {/* CONSULTOR DE QUAL COMBUSTÍVEL USAR (RECOMENDAÇÃO INTELIGENTE) */}
+            <div className={`p-3.5 rounded-2xl border transition-all ${
+              parityAnalysis.betterOption === 'Etanol'
+                ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200'
+                : 'bg-sky-950/40 border-sky-500/40 text-sky-200'
+            }`}>
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="text-xs font-black uppercase tracking-tight text-white">
+                    QUAL COMBUSTÍVEL USAR?
+                  </span>
+                </div>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full uppercase border ${
+                  parityAnalysis.betterOption === 'Etanol'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                }`}>
+                  {parityAnalysis.betterOption === 'Etanol' ? '🟢 Recomendado: ETANOL' : '🔵 Recomendado: GASOLINA'}
+                </span>
+              </div>
+
+              <p className="text-[11px] text-slate-300 leading-snug mb-3">
+                {parityAnalysis.reason}
+              </p>
+
+              {/* BOTÕES DE 1 TOQUE PARA APLICAR O COMBUSTÍVEL */}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => applyRecommendedFuel('Etanol', parseFloat(pumpEthPrice) || 3.99)}
+                  className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                    fuelType.includes('Etanol')
+                      ? 'bg-emerald-500/30 border-emerald-400 text-white shadow-md'
+                      : 'bg-black/30 border-white/10 hover:border-white/20 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black flex items-center gap-1">
+                      ⚡ Etanol
+                      {parityAnalysis.betterOption === 'Etanol' && (
+                        <span className="text-[9px] bg-emerald-500 text-slate-950 px-1 rounded font-black">TOP</span>
+                      )}
+                    </span>
+                    <span className="text-xs font-bold text-emerald-400">
+                      R$ {parseFloat(pumpEthPrice).toFixed(2)}/L
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1">
+                    Custo: <strong className="text-slate-200">{formatCurrency(parityAnalysis.costPerKmEthanol)}/km</strong>
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => applyRecommendedFuel('Gasolina Comum', parseFloat(pumpGasPrice) || 5.89)}
+                  className={`p-2.5 rounded-xl border text-left transition flex flex-col justify-between ${
+                    fuelType.includes('Gasolina')
+                      ? 'bg-sky-500/30 border-sky-400 text-white shadow-md'
+                      : 'bg-black/30 border-white/10 hover:border-white/20 text-slate-300'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black flex items-center gap-1">
+                      ⛽ Gasolina
+                      {parityAnalysis.betterOption === 'Gasolina' && (
+                        <span className="text-[9px] bg-sky-500 text-slate-950 px-1 rounded font-black">TOP</span>
+                      )}
+                    </span>
+                    <span className="text-xs font-bold text-sky-400">
+                      R$ {parseFloat(pumpGasPrice).toFixed(2)}/L
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 mt-1">
+                    Custo: <strong className="text-slate-200">{formatCurrency(parityAnalysis.costPerKmGasoline)}/km</strong>
+                  </span>
+                </button>
+              </div>
+
+              {/* TOGGLE PARA COMPARAR OUTROS PREÇOS NA BOMBA */}
+              <div className="mt-2 pt-2 border-t border-white/10 flex items-center justify-between text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setShowPriceCompareInputs(!showPriceCompareInputs)}
+                  className="text-slate-400 hover:text-white flex items-center gap-1 font-bold underline"
+                >
+                  {showPriceCompareInputs ? '▲ Ocultar ajuste de bomba' : '▼ Preço do posto está diferente? Ajustar bomba'}
+                </button>
+                <span className="text-[10px] text-slate-400">
+                  Paridade: <strong className="text-white font-mono">{parityAnalysis.ethanolRatioPercent.toFixed(1)}%</strong>
+                </span>
+              </div>
+
+              {showPriceCompareInputs && (
+                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-white/10">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Preço Gasolina no Posto (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={pumpGasPrice}
+                      onChange={e => setPumpGasPrice(e.target.value)}
+                      className="w-full bg-black/40 border border-white/15 rounded-lg px-2 py-1 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-0.5">Preço Etanol no Posto (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={pumpEthPrice}
+                      onChange={e => setPumpEthPrice(e.target.value)}
+                      className="w-full bg-black/40 border border-white/15 rounded-lg px-2 py-1 text-xs text-white"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Posto</label>
+                <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Posto / Local</label>
                 <input
                   type="text"
                   value={fuelStation}
                   onChange={e => setFuelStation(e.target.value)}
+                  placeholder="Posto Ipiranga / Shell / Petrobras"
                   className="w-full bg-white/5 border border-white/15 rounded-xl px-3 py-2 text-xs text-white"
                 />
               </div>
               <div>
-                <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Combustível</label>
+                <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Combustível Escolhido</label>
                 <select
                   value={fuelType}
                   onChange={e => setFuelType(e.target.value)}
@@ -512,7 +703,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
               </div>
 
               <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Total (R$)</label>
+                <label className="text-[10px] font-bold text-slate-400 uppercase block mb-1">Total Pago (R$)</label>
                 <input
                   type="number"
                   step="0.01"

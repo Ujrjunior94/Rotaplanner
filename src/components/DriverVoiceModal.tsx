@@ -7,7 +7,7 @@ import {
   VoiceEntities,
 } from '../utils/voiceUtils';
 import { ConversationContext } from '../services/voiceParser';
-import { formatCurrency, formatKm } from '../utils/calc';
+import { formatCurrency, formatKm, calcShiftCostsFromKm } from '../utils/calc';
 import { PlatformType, ExpenseCategory } from '../types';
 import {
   Mic,
@@ -78,6 +78,7 @@ export const DriverVoiceModal: React.FC<DriverVoiceModalProps> = ({
     startShift,
     endShift,
     updateProfile,
+    activeStrategy,
   } = useDriver();
 
   const [isListening, setIsListening] = useState(false);
@@ -252,16 +253,22 @@ export const DriverVoiceModal: React.FC<DriverVoiceModalProps> = ({
         startShift(startKm);
         contextRef.current.lastIntent = 'START_WORK_SESSION';
       } else if (intent === 'END_WORK_SESSION') {
-        const endKm = entities.odometer || vehicle.currentOdometer;
+        const startKm = activeSession?.startOdometer || vehicle.currentOdometer;
+        const endKm = entities.odometer || (entities.distanceKm ? startKm + entities.distanceKm : vehicle.currentOdometer + 100);
+        const kmDriven = Math.max(0, endKm - startKm);
+        const gasPrice = profile.gasPriceReference || vehicle.gasolinePrice || 5.89;
+        const maintenanceRate = activeStrategy?.fuelAndMaintenancePlan.reserveMaintenancePerKm || 0.15;
+        const costs = calcShiftCostsFromKm(kmDriven, vehicle, gasPrice, maintenanceRate);
+        const autoFuel = costs.fuelCost;
         const totalGross = entities.amount || 0;
-        endShift(endKm, totalGross, 0, 0, 0, 0, 'Encerrado via Driver Voice');
+        endShift(endKm, totalGross, 0, 0, 0, autoFuel, `Encerrado via Driver Voice (${kmDriven} km rodados - Combustível R$ ${autoFuel.toFixed(2)})`);
         contextRef.current.lastIntent = 'END_WORK_SESSION';
       }
 
       setCurrentProposal(null);
       contextRef.current.pendingProposal = undefined;
     },
-    [addEarning, addExpense, addFuelRecord, addPlannerEvent, startShift, endShift, updateProfile, vehicle]
+    [addEarning, addExpense, addFuelRecord, addPlannerEvent, startShift, endShift, updateProfile, vehicle, activeSession, profile, activeStrategy]
   );
 
   // Processa a fala ou texto chamando a utilidade parseVoiceIntent

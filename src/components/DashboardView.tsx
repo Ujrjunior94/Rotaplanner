@@ -7,6 +7,7 @@ import {
   safeDivide,
 } from '../utils/calc';
 import { FuelAdvisorCard } from './FuelAdvisorCard';
+import { SmartTipsCard } from './SmartTipsCard';
 import {
   TrendingUp,
   DollarSign,
@@ -329,6 +330,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         onOpenAdvisorModal={onOpenFuelAdvisorModal}
         onOpenQuickFuel={onOpenQuickFuel}
       />
+
+      {/* DICAS INTELIGENTES: HORÁRIOS DE PICO, ROTAS ESTRATÉGICAS E RECOMENDAÇÕES */}
+      <SmartTipsCard onNavigateTab={onNavigateTab} />
 
       {/* GRÁFICO DOS ÚLTIMOS 7 DIAS */}
       <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-2xl space-y-4">

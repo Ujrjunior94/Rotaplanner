@@ -31,11 +31,13 @@ import {
 interface DriverModeViewProps {
   onExitDriverMode: () => void;
   onOpenVoiceModal: () => void;
+  onOpenShiftModal?: () => void;
 }
 
 export const DriverModeView: React.FC<DriverModeViewProps> = ({
   onExitDriverMode,
   onOpenVoiceModal,
+  onOpenShiftModal,
 }) => {
   const {
     profile,
@@ -49,6 +51,7 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
     addEarning,
     addExpense,
     addFuelRecord,
+    activeStrategy,
   } = useDriver();
 
   const {
@@ -167,6 +170,25 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
         
         {/* CARD PRINCIPAL DE FATURAMENTO & META */}
         <div className="bg-slate-900/90 border border-white/15 rounded-3xl p-5 sm:p-7 shadow-2xl space-y-4">
+          {/* ESTRATÉGIA ATIVA & REGRAS DE OURO */}
+          {activeStrategy && (
+            <div className="bg-emerald-950/40 border border-emerald-500/30 p-2.5 sm:p-3 rounded-2xl flex items-center justify-between gap-2 text-xs flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-lg bg-emerald-500 text-slate-950 font-black text-[10px] uppercase">
+                  Estratégia
+                </span>
+                <span className="font-bold text-white text-xs truncate max-w-[180px] sm:max-w-none">
+                  {activeStrategy.name}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-bold text-emerald-300">
+                <span>🎯 Min. {formatCurrency(activeStrategy.acceptanceRules.minRateKm)}/km</span>
+                <span className="text-slate-500">•</span>
+                <span>⏱️ Min. {formatCurrency(activeStrategy.acceptanceRules.minRateHour)}/h</span>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
               <DollarSign className="w-4 h-4 text-emerald-400" />
@@ -317,7 +339,13 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
           {!activeSession ? (
             <button
               type="button"
-              onClick={() => processInputText('Começar expediente')}
+              onClick={() => {
+                if (onOpenShiftModal) {
+                  onOpenShiftModal();
+                } else {
+                  processInputText('Começar expediente');
+                }
+              }}
               className="bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 p-3 rounded-2xl text-left transition"
             >
               <div className="flex items-center gap-1.5 text-emerald-300 font-black text-xs">
@@ -329,14 +357,20 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
           ) : (
             <button
               type="button"
-              onClick={() => processInputText('Finalizar expediente')}
+              onClick={() => {
+                if (onOpenShiftModal) {
+                  onOpenShiftModal();
+                } else {
+                  processInputText('Finalizar expediente');
+                }
+              }}
               className="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 p-3 rounded-2xl text-left transition"
             >
               <div className="flex items-center gap-1.5 text-rose-300 font-black text-xs">
                 <Square className="w-3.5 h-3.5 fill-current" />
                 Finalizar Turno
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">Encerrar e salvar dia</p>
+              <p className="text-[10px] text-slate-400 mt-1">Cálculo de custos por KM</p>
             </button>
           )}
 

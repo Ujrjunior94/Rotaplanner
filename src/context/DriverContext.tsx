@@ -11,7 +11,9 @@ import {
   MaintenanceRecord,
   DriverAlert,
   PlatformType,
+  DriverStrategy,
 } from '../types';
+import { defaultStrategyPresets } from '../data/defaultStrategies';
 
 interface DriverContextType {
   profile: UserProfile;
@@ -26,6 +28,8 @@ interface DriverContextType {
   maintenances: MaintenanceRecord[];
   alerts: DriverAlert[];
   isDemoData: boolean;
+  strategies: DriverStrategy[];
+  activeStrategy: DriverStrategy | null;
   
   // Actions
   updateProfile: (data: Partial<UserProfile>) => void;
@@ -41,7 +45,27 @@ interface DriverContextType {
     notes?: string,
     platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>
   ) => void;
+  addCompletedShift: (sessionData: {
+    startTime?: string;
+    endTime?: string;
+    startOdometer: number;
+    endOdometer: number;
+    grossEarnings: number;
+    tips?: number;
+    tripsCount?: number;
+    fuelExpenses?: number;
+    otherExpenses?: number;
+    notes?: string;
+    platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
+  }) => void;
   cancelShift: () => void;
+  
+  // Strategies
+  createStrategy: (strategy: Omit<DriverStrategy, 'id' | 'createdAt'>) => DriverStrategy;
+  updateStrategy: (id: string, data: Partial<DriverStrategy>) => void;
+  deleteStrategy: (id: string) => void;
+  activateStrategy: (id: string, applyToSchedule?: boolean) => void;
+  resetStrategiesToDefault: () => void;
   
   // Planner
   addPlannerEvent: (event: Omit<PlannerEvent, 'id'>) => void;
@@ -174,9 +198,25 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return saved ? JSON.parse(saved) : [];
   });
 
+  const [strategies, setStrategies] = useState<DriverStrategy[]>(() => {
+    const saved = localStorage.getItem('@driver_strategies_v2');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      } catch (e) {
+        console.error('Erro ao ler estratégias salvas:', e);
+      }
+    }
+    return defaultStrategyPresets;
+  });
+
   const [isDemoData, setIsDemoData] = useState<boolean>(() => {
     return localStorage.getItem('@driver_is_demo_v2') === 'true';
   });
+
+  // Estratégia ativa atual
+  const activeStrategy = strategies.find(s => s.isActive) || strategies[0] || null;
 
   // Salvar no localStorage de forma contínua
   useEffect(() => {
@@ -190,8 +230,9 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.setItem('@driver_fuel_v2', JSON.stringify(fuelRecords));
     localStorage.setItem('@driver_maint_v2', JSON.stringify(maintenances));
     localStorage.setItem('@driver_alerts_v2', JSON.stringify(alerts));
+    localStorage.setItem('@driver_strategies_v2', JSON.stringify(strategies));
     localStorage.setItem('@driver_is_demo_v2', String(isDemoData));
-  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, isDemoData]);
+  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, isDemoData]);
 
   // Checagem proativa de alertas
   useEffect(() => {
@@ -305,9 +346,149 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     );
   };
 
+  const addCompletedShift = (data: {
+    startTime?: string;
+    endTime?: string;
+    startOdometer: number;
+    endOdometer: number;
+    grossEarnings: number;
+    tips?: number;
+    tripsCount?: number;
+    fuelExpenses?: number;
+    otherExpenses?: number;
+    notes?: string;
+    platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
+  }) => {
+    const kmDriven = Math.max(0, data.endOdometer - data.startOdometer);
+    const calculatedFuel = data.fuelExpenses !== undefined
+      ? data.fuelExpenses
+      : ((kmDriven / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89));
+
+    const newSession: WorkSession = {
+      id: 'ses-' + Date.now(),
+      startTime: data.startTime || new Date(Date.now() - 6 * 3600000).toISOString(),
+      endTime: data.endTime || new Date().toISOString(),
+      startOdometer: data.startOdometer,
+      endOdometer: data.endOdometer,
+      status: 'completed',
+      grossEarnings: data.grossEarnings,
+      tips: data.tips || 0,
+      tripsCount: data.tripsCount || 1,
+      fuelExpenses: Math.round(calculatedFuel * 100) / 100,
+      otherExpenses: data.otherExpenses || 0,
+      platformEarnings: data.platformEarnings,
+      notes: data.notes,
+    };
+
+    setSessions(prev => [newSession, ...prev]);
+    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, data.endOdometer) }));
+
+    const sessionDate = newSession.startTime.split('T')[0];
+    setPlannerEvents(prev =>
+      prev.map(p =>
+        p.date === sessionDate
+          ? {
+              ...p,
+              realizedGross: (p.realizedGross || 0) + data.grossEarnings + (data.tips || 0),
+              realizedExpenses: (p.realizedExpenses || 0) + (newSession.fuelExpenses + (data.otherExpenses || 0)),
+              realizedTrips: (p.realizedTrips || 0) + (data.tripsCount || 1),
+            }
+          : p
+      )
+    );
+  };
+
   const cancelShift = () => {
     if (!activeSession) return;
     setSessions(prev => prev.filter(s => s.id !== activeSession.id));
+  };
+
+  // Funções de Gerenciamento de Estratégias
+  const createStrategy = (strategyData: Omit<DriverStrategy, 'id' | 'createdAt'>): DriverStrategy => {
+    const newStrategy: DriverStrategy = {
+      ...strategyData,
+      id: 'strat-custom-' + Date.now(),
+      isPreset: false,
+      isActive: false,
+      createdAt: new Date().toISOString(),
+    };
+    setStrategies(prev => [newStrategy, ...prev]);
+    return newStrategy;
+  };
+
+  const updateStrategy = (id: string, data: Partial<DriverStrategy>) => {
+    setStrategies(prev =>
+      prev.map(s => (s.id === id ? { ...s, ...data } : s))
+    );
+  };
+
+  const deleteStrategy = (id: string) => {
+    setStrategies(prev => {
+      const filtered = prev.filter(s => s.id !== id);
+      if (filtered.length === 0) {
+        return defaultStrategyPresets;
+      }
+      // Se deletou a ativa, ativa a primeira disponível
+      if (!filtered.some(s => s.isActive)) {
+        filtered[0] = { ...filtered[0], isActive: true };
+      }
+      return filtered;
+    });
+  };
+
+  const activateStrategy = (id: string, applyToSchedule: boolean = false) => {
+    const target = strategies.find(s => s.id === id);
+    if (!target) return;
+
+    setStrategies(prev =>
+      prev.map(s => ({
+        ...s,
+        isActive: s.id === id,
+      }))
+    );
+
+    // Sincronizar parâmetros do perfil do motorista com a estratégia ativada
+    setProfile(prev => ({
+      ...prev,
+      weeklyGoal: target.targetWeeklyGross,
+      dailyGoal: Math.round(target.targetWeeklyGross / Math.max(target.workingWindows.length, 1)),
+      minAcceptableRateKm: target.acceptanceRules.minRateKm,
+      minAcceptableRateHour: target.acceptanceRules.minRateHour,
+      platforms: target.primaryPlatforms,
+    }));
+
+    // Se o motorista optar por aplicar a escala ao Planner
+    if (applyToSchedule && target.workingWindows.length > 0) {
+      const newRecSchedule: RecurringScheduleDay[] = [0, 1, 2, 3, 4, 5, 6].map(dayNum => {
+        const win = target.workingWindows.find(w => w.dayOfWeek === dayNum);
+        if (win) {
+          return {
+            dayOfWeek: dayNum,
+            type: 'work',
+            startTime: win.startTime,
+            endTime: win.endTime,
+            targetEarnings: win.targetDailyEarnings,
+            platforms: [win.recommendedApp, ...target.primaryPlatforms.filter(p => p !== win.recommendedApp)],
+            notes: `${win.focusArea} ${win.passActive ? `[${win.passActive}]` : ''}`.trim(),
+          };
+        } else {
+          return {
+            dayOfWeek: dayNum,
+            type: 'off',
+            startTime: '',
+            endTime: '',
+            targetEarnings: 0,
+            platforms: [],
+            notes: 'Descanso planejado',
+          };
+        }
+      });
+      setRecurringScheduleState(newRecSchedule);
+    }
+  };
+
+  const resetStrategiesToDefault = () => {
+    setStrategies(defaultStrategyPresets);
   };
 
   const addPlannerEvent = (event: Omit<PlannerEvent, 'id'>) => {
@@ -546,6 +727,14 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       const startOdo = 44000 + (14 - i) * 140;
       const endOdo = startOdo + km;
 
+      const uberGross = Math.round(gross * 0.55);
+      const ninetyNineGross = Math.round(gross * 0.30);
+      const inDriveGross = Math.max(gross - uberGross - ninetyNineGross, 0);
+
+      const uberTrips = Math.max(Math.round(trips * 0.55), 1);
+      const ninetyNineTrips = Math.max(Math.round(trips * 0.30), 1);
+      const inDriveTrips = Math.max(trips - uberTrips - ninetyNineTrips, 1);
+
       demoSessions.push({
         id: `demo-ses-${i}`,
         startTime: startIso,
@@ -559,8 +748,9 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         fuelExpenses: fuel,
         otherExpenses: 18,
         platformEarnings: {
-          Uber: { amount: Math.round(gross * 0.65), trips: Math.round(trips * 0.65) },
-          99: { amount: Math.round(gross * 0.35), trips: Math.round(trips * 0.35) },
+          Uber: { amount: uberGross, trips: uberTrips },
+          99: { amount: ninetyNineGross, trips: ninetyNineTrips },
+          inDrive: { amount: inDriveGross, trips: inDriveTrips },
         },
         notes: 'Expediente regular na zona sul e centro expandido.',
       });
@@ -569,18 +759,26 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         {
           id: `demo-earn-uber-${i}`,
           platform: 'Uber',
-          amount: Math.round(gross * 0.65),
-          tip: Math.round(tips * 0.7),
-          tripsCount: Math.round(trips * 0.65),
+          amount: uberGross,
+          tip: Math.round(tips * 0.6),
+          tripsCount: uberTrips,
           timestamp: `${dateStr}T10:00:00.000Z`,
         },
         {
           id: `demo-earn-99-${i}`,
           platform: '99',
-          amount: Math.round(gross * 0.35),
-          tip: Math.round(tips * 0.3),
-          tripsCount: Math.round(trips * 0.35),
+          amount: ninetyNineGross,
+          tip: Math.round(tips * 0.25),
+          tripsCount: ninetyNineTrips,
           timestamp: `${dateStr}T13:00:00.000Z`,
+        },
+        {
+          id: `demo-earn-indrive-${i}`,
+          platform: 'inDrive',
+          amount: inDriveGross,
+          tip: Math.round(tips * 0.15),
+          tripsCount: inDriveTrips,
+          timestamp: `${dateStr}T16:00:00.000Z`,
         }
       );
 
@@ -744,10 +942,18 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         maintenances,
         alerts,
         isDemoData,
+        strategies,
+        activeStrategy,
+        createStrategy,
+        updateStrategy,
+        deleteStrategy,
+        activateStrategy,
+        resetStrategiesToDefault,
         updateProfile,
         updateVehicle,
         startShift,
         endShift,
+        addCompletedShift,
         cancelShift,
         addPlannerEvent,
         updatePlannerEvent,

@@ -36,6 +36,8 @@ export const PlannerView: React.FC<PlannerViewProps> = ({ onOpenFuelAdvisor }) =
     applyRecurringScheduleToRange,
     duplicateScheduleToWeek,
     sessions,
+    activeStrategy,
+    activateStrategy,
   } = useDriver();
 
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'recurring'>('week');
@@ -259,6 +261,23 @@ export const PlannerView: React.FC<PlannerViewProps> = ({ onOpenFuelAdvisor }) =
               >
                 <Fuel className="w-3.5 h-3.5 text-amber-400" />
                 <span className="hidden sm:inline">Abastecimento Hoje?</span>
+              </button>
+            )}
+
+            {activeStrategy && (
+              <button
+                type="button"
+                onClick={() => {
+                  activateStrategy(activeStrategy.id, true);
+                  applyRecurringScheduleToRange(currentWeekDays[0], 7);
+                  alert(`Escala da estratégia "${activeStrategy.name}" aplicada com sucesso a esta semana!`);
+                }}
+                className="text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 px-2.5 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-1.5 transition"
+                title={`Carrega os turnos e metas da estratégia ativa (${activeStrategy.name})`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden md:inline">Estratégia: {activeStrategy.name.slice(0, 18)}...</span>
+                <span className="md:hidden">Estratégia</span>
               </button>
             )}
 

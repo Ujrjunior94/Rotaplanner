@@ -32,7 +32,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'analyzer', label: 'Vale a Pena?', icon: Calculator, badge: 'Calculadora' },
     { id: 'vehicle', label: 'Custo do Carro', icon: Car },
     { id: 'goals', label: 'Metas & Progresso', icon: Target },
-    { id: 'insights', label: 'Driver Insights', icon: Lightbulb },
+    { id: 'insights', label: 'Estratégias & Insights', icon: Lightbulb, badge: 'Playbook' },
     { id: 'reports', label: 'Relatórios & Gráficos', icon: BarChart3 },
     { id: 'settings', label: 'Configurações', icon: Settings },
   ];

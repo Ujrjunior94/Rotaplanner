@@ -11,6 +11,7 @@ import {
   Sparkles,
   Fuel,
   Mic,
+  BarChart3,
 } from 'lucide-react';
 
 interface MoreMenuModalProps {
@@ -70,6 +71,14 @@ export const MoreMenuModal: React.FC<MoreMenuModalProps> = ({
       action: () => {
         if (onOpenFuelAdvisor) onOpenFuelAdvisor();
       },
+    },
+    {
+      id: 'reports' as MainTabType,
+      label: 'Relatórios em PDF & Gráficos',
+      desc: 'Emita demonstrativos semanais e mensais em PDF (A4)',
+      icon: BarChart3,
+      color: 'text-emerald-400',
+      bg: 'bg-emerald-500/10',
     },
     {
       id: 'goals' as MainTabType,

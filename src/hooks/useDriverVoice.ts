@@ -176,14 +176,17 @@ export function useDriverVoice() {
       } else if (intent === 'START_WORK_SESSION' && data?.startSession) {
         startShift(data.startSession.startKm || vehicle.currentOdometer);
       } else if (intent === 'END_WORK_SESSION' && data?.endSession && activeSession) {
+        const finalKm = data.endSession.endKm || vehicle.currentOdometer + 60;
+        const kmDriven = Math.max(0, finalKm - activeSession.startOdometer);
+        const autoFuel = (kmDriven / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89);
         endShift(
-          data.endSession.endKm || vehicle.currentOdometer + 60,
+          finalKm,
           data.endSession.totalGross || 0,
           0,
           1,
+          Math.round(autoFuel * 100) / 100,
           0,
-          0,
-          'Encerrado via Driver Voice'
+          `Encerrado via Driver Voice (${kmDriven} km rodados • Combustível autocalculado: R$ ${autoFuel.toFixed(2)})`
         );
       } else if (intent === 'CREATE_PLANNER_EVENT' && data?.plannerEvent) {
         addPlannerEvent({

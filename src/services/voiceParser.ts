@@ -16,6 +16,7 @@ import {
   calcRealCarCost,
   calcFuelParity,
   calcDailyFuelAdvisor,
+  calcShiftCostsFromKm,
   safeDivide,
 } from '../utils/calc';
 
@@ -122,7 +123,14 @@ export interface VoiceParseResult {
     weeklyPlan?: ProposedWeeklyPlanData;
     goal?: ProposedGoalData;
     startSession?: { startKm?: number; notes?: string };
-    endSession?: { endKm?: number; totalGross?: number; fuelExpense?: number };
+    endSession?: {
+      endKm?: number;
+      kmDriven?: number;
+      totalGross?: number;
+      fuelExpense?: number;
+      calculatedFuelCost?: number;
+      calculatedMaintenanceCost?: number;
+    };
     queryAnswer?: string;
     queryDetails?: { label: string; value: string }[];
     strategyInsights?: string[];
@@ -420,14 +428,16 @@ export function parseVoiceCommand(
     };
   }
 
-  // 4. END_WORK_SESSION ("Finalizar expediente", "Encerrar turno", "Terminei o dia")
+  // 4. END_WORK_SESSION ("Finalizar expediente", "Encerrar turno", "Terminei o dia", "Finalizei a rota")
   if (
     norm.includes('finalizar expediente') ||
     norm.includes('encerrar expediente') ||
     norm.includes('encerrar turno') ||
     norm.includes('finalizar turno') ||
     norm.includes('terminei de trabalhar') ||
-    norm.includes('fechar dia')
+    norm.includes('fechar dia') ||
+    norm.includes('finalizar rota') ||
+    norm.includes('encerrar rota')
   ) {
     if (!driverData.activeSession) {
       return {
@@ -440,17 +450,38 @@ export function parseVoiceCommand(
     }
 
     const val = extractMonetaryValue(norm);
+    const startKm = driverData.activeSession.startOdometer;
+    
+    // Extrai KM se mencionado (ex: "rodei 130 km", "odometro 85500", "com 120 km")
+    let extractedKm = 100;
+    const kmMatch = norm.match(/(?:rodei|com|odometro|hodometro|final|km)\s*(\d{2,7})/i);
+    if (kmMatch && kmMatch[1]) {
+      const parsedNum = parseInt(kmMatch[1], 10);
+      if (parsedNum > 1000) {
+        extractedKm = Math.max(0, parsedNum - startKm);
+      } else {
+        extractedKm = parsedNum;
+      }
+    }
+
+    const endKm = startKm + extractedKm;
+    const gasPrice = driverData.profile.gasPriceReference || 5.89;
+    const costs = calcShiftCostsFromKm(extractedKm, driverData.vehicle, gasPrice, 0.15);
+
     return {
       intent: 'END_WORK_SESSION',
       confidence: 0.95,
       rawText,
       requiresConfirmation: true,
-      speechResponse: 'Deseja encerrar o expediente ativo agora?',
-      confirmationMessage: 'Encerrar o turno atual e computar ganhos e horas?',
+      speechResponse: `Finalizando rota com ${extractedKm} km rodados. Custo de combustível autocalculado em ${formatCurrency(costs.fuelCost)} e manutenção em ${formatCurrency(costs.maintenanceCost)}. Confirmar encerramento?`,
+      confirmationMessage: `Encerrar turno com ${extractedKm} km rodados (${formatCurrency(costs.fuelCost)} de combustível e ${formatCurrency(costs.maintenanceCost)} de manutenção)?`,
       data: {
         endSession: {
-          endKm: driverData.vehicle.currentOdometer + 80,
+          endKm,
+          kmDriven: extractedKm,
           totalGross: val || 0,
+          calculatedFuelCost: costs.fuelCost,
+          calculatedMaintenanceCost: costs.maintenanceCost,
         },
       },
     };
@@ -585,6 +616,46 @@ export function parseVoiceCommand(
           { label: 'Faturado no Mês', value: formatCurrency(totalEarnedMonth) },
           { label: 'Restante', value: formatCurrency(remaining) },
           { label: 'Progresso', value: `${pct}%` },
+        ],
+      },
+    };
+  }
+
+  // "Qual combustível devo usar?", "Etanol ou gasolina?", "O que compensa abastecer?"
+  if (
+    norm.includes('qual combustivel devo usar') ||
+    norm.includes('qual combustivel usar') ||
+    norm.includes('etanol ou gasolina') ||
+    norm.includes('gasolina ou etanol') ||
+    norm.includes('o que compensa abastecer') ||
+    norm.includes('qual compensa abastecer') ||
+    norm.includes('qual compensa mais')
+  ) {
+    const gasPrice = driverData.profile.gasPriceReference || 5.89;
+    const ethPrice = gasPrice * 0.68;
+    const isFlex = driverData.vehicle.fuelType === 'Flex' || !driverData.vehicle.fuelType;
+    const parity = calcFuelParity(ethPrice, gasPrice, driverData.vehicle.avgConsumption || 12.5, isFlex);
+
+    let speech = '';
+    if (parity.betterOption === 'Etanol') {
+      speech = `Recomendo abastecer com Etanol! A paridade está em ${parity.ethanolRatioPercent.toFixed(1)}%, abaixo do limite de 70%. O custo estimado é de ${formatCurrency(parity.costPerKmEthanol)} por km, gerando uma economia de ${formatCurrency(parity.savingsPerKm)} por km rodado em relação à gasolina.`;
+    } else {
+      speech = `Recomendo abastecer com Gasolina! A paridade está em ${parity.ethanolRatioPercent.toFixed(1)}%, acima dos 70%. A gasolina oferece maior autonomia e menor custo por km (${formatCurrency(parity.costPerKmGasoline)}/km).`;
+    }
+
+    return {
+      intent: 'QUERY_FUEL',
+      confidence: 0.98,
+      rawText,
+      requiresConfirmation: false,
+      speechResponse: speech,
+      data: {
+        queryAnswer: speech,
+        queryDetails: [
+          { label: 'Recomendação', value: parity.betterOption === 'Etanol' ? '🟢 ETANOL' : '🔵 GASOLINA' },
+          { label: 'Paridade de Preço', value: `${parity.ethanolRatioPercent.toFixed(1)}% (Ref: 70%)` },
+          { label: 'Custo/KM Etanol', value: `${formatCurrency(parity.costPerKmEthanol)}/km` },
+          { label: 'Custo/KM Gasolina', value: `${formatCurrency(parity.costPerKmGasoline)}/km` },
         ],
       },
     };

@@ -212,6 +212,10 @@ export const DriverPlannerApp: React.FC = () => {
             setShowDriverMode(false);
             setShowVoiceModal(true);
           }}
+          onOpenShiftModal={() => {
+            setShowDriverMode(false);
+            setShowShiftModal(true);
+          }}
         />
       )}
 

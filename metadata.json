@@ -1,5 +1,5 @@
 {
-  "name": "Rota Planner",
+  "name": "Driver Planner",
   "description": "Seu painel pessoal para dirigir, planejar e lucrar.",
   "requestFramePermissions": [
     "microphone"

@@ -106,6 +106,78 @@ export const calcRealCarCost = (
 };
 
 /**
+ * Cálculo Automático dos Custos da Rota / Expediente por KM Rodado
+ */
+export interface ShiftCostsResult {
+  kmDriven: number;
+  avgConsumption: number;
+  fuelPricePerLiter: number;
+  litersBurned: number;
+  fuelCost: number;
+  maintenanceReservePerKm: number;
+  maintenanceCost: number;
+  depreciationPerKm: number;
+  depreciationCost: number;
+  fixedCostPerKm: number;
+  fixedCost: number;
+  totalDirectCost: number; // Combustível + Manutenção
+  totalCompleteCost: number; // Combustível + Manutenção + Depreciação + Custos Fixos
+  directCostPerKm: number;
+  completeCostPerKm: number;
+}
+
+export const calcShiftCostsFromKm = (
+  kmDriven: number,
+  vehicle: Vehicle,
+  fuelPricePerLiter: number = 5.89,
+  customMaintenancePerKm?: number
+): ShiftCostsResult => {
+  const safeKm = Math.max(0, kmDriven || 0);
+  const avgConsumption = vehicle.avgConsumption > 0 ? vehicle.avgConsumption : 11.5;
+  const safeFuelPrice = fuelPricePerLiter > 0 ? fuelPricePerLiter : 5.89;
+
+  const litersBurned = safeDivide(safeKm, avgConsumption);
+  const fuelCost = litersBurned * safeFuelPrice;
+
+  const maintenanceReservePerKm = customMaintenancePerKm !== undefined && customMaintenancePerKm >= 0
+    ? customMaintenancePerKm
+    : 0.15; // R$ 0.15/km padrão para revisão, pneus, pastilhas e óleo
+  const maintenanceCost = safeKm * maintenanceReservePerKm;
+
+  const depreciationPerKm = calcDepreciationPerKm(vehicle);
+  const depreciationCost = safeKm * depreciationPerKm;
+
+  // Custos fixos proporcionais (mensalidade / 3000 km médios)
+  const insuranceMonthly = vehicle.insuranceMonthly || 0;
+  const ipvaMonthly = safeDivide(vehicle.ipvaAnnual || 0, 12);
+  const financingMonthly = vehicle.financed ? (vehicle.financingInstallment || 0) : 0;
+  const fixedMonthly = insuranceMonthly + ipvaMonthly + financingMonthly;
+  const fixedCostPerKm = safeDivide(fixedMonthly, 3000);
+  const fixedCost = safeKm * fixedCostPerKm;
+
+  const totalDirectCost = fuelCost + maintenanceCost;
+  const totalCompleteCost = totalDirectCost + depreciationCost + fixedCost;
+
+  return {
+    kmDriven: safeKm,
+    avgConsumption,
+    fuelPricePerLiter: safeFuelPrice,
+    litersBurned: Math.round(litersBurned * 100) / 100,
+    fuelCost: Math.round(fuelCost * 100) / 100,
+    maintenanceReservePerKm,
+    maintenanceCost: Math.round(maintenanceCost * 100) / 100,
+    depreciationPerKm: Math.round(depreciationPerKm * 100) / 100,
+    depreciationCost: Math.round(depreciationCost * 100) / 100,
+    fixedCostPerKm: Math.round(fixedCostPerKm * 100) / 100,
+    fixedCost: Math.round(fixedCost * 100) / 100,
+    totalDirectCost: Math.round(totalDirectCost * 100) / 100,
+    totalCompleteCost: Math.round(totalCompleteCost * 100) / 100,
+    directCostPerKm: safeDivide(totalDirectCost, safeKm),
+    completeCostPerKm: safeDivide(totalCompleteCost, safeKm),
+  };
+};
+
+/**
  * Avaliador "Vale a Pena?"
  */
 export const analyzeRide = (
