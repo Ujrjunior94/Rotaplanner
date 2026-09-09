@@ -1,0 +1,81 @@
+import { DashboardCardConfig } from '../types';
+
+export const DEFAULT_DASHBOARD_CARDS: DashboardCardConfig[] = [
+  {
+    id: 'cockpit_metrics',
+    title: 'Cockpit de Métricas de Hoje',
+    description: 'Resumo de faturamento, despesas diretas, lucro real e tempo em rota.',
+    visible: true,
+    category: 'financial',
+  },
+  {
+    id: 'reserves_wallet',
+    title: 'Reservas Estratégicas & Saldo Imediato',
+    description: 'Reserva para combustível futuro, manutenção e saldo imediato em dinheiro.',
+    visible: true,
+    category: 'financial',
+  },
+  {
+    id: 'unit_efficiency',
+    title: 'Eficiência Unitária (R$/h & R$/km)',
+    description: 'Indicadores rápidos de rentabilidade horária, por km e custo por km.',
+    visible: true,
+    category: 'financial',
+  },
+  {
+    id: 'daily_goal',
+    title: 'Progresso da Meta Diária',
+    description: 'Barra de evolução da meta de faturamento definida para o dia de hoje.',
+    visible: true,
+    category: 'goals',
+  },
+  {
+    id: 'weekly_goal',
+    title: 'Progresso da Meta Semanal (Weekly Goal Progress)',
+    description: 'Acompanhamento do faturamento acumulado na semana em direção à meta semanal.',
+    visible: true,
+    category: 'goals',
+  },
+  {
+    id: 'next_service',
+    title: 'Próxima Revisão & Manutenção (Next Service)',
+    description: 'Status de troca de óleo, freios, pneus e km restantes para a próxima manutenção preventiva.',
+    visible: true,
+    category: 'vehicle',
+  },
+  {
+    id: 'fuel_advisor',
+    title: 'Consultor de Abastecimento',
+    description: 'Cálculo inteligente para saber se compensa abastecer hoje antes de sair para a rota.',
+    visible: true,
+    category: 'vehicle',
+  },
+  {
+    id: 'sandero_fuel_gauge',
+    title: 'Painel do Tanque (Estilo Renault Sandero)',
+    description: 'Nível de combustível em 8 barras LCD, autonomia estimada e alerta de reserva.',
+    visible: true,
+    category: 'vehicle',
+  },
+  {
+    id: 'performance_chart',
+    title: 'Gráfico de Desempenho (7 Dias)',
+    description: 'Visualização comparativa de faturamento, lucro, corridas e horas trabalhadas.',
+    visible: true,
+    category: 'insights',
+  },
+  {
+    id: 'smart_summary',
+    title: 'Resumo Inteligente da Operação',
+    description: 'Melhor dia da semana, melhor horário, aplicativo mais lucrativo e média diária.',
+    visible: true,
+    category: 'insights',
+  },
+  {
+    id: 'recent_rides',
+    title: 'Corridas & Expedientes Recentes (Recent Rides)',
+    description: 'Histórico dos últimos turnos e corridas com valores, km e observações.',
+    visible: true,
+    category: 'history',
+  },
+];

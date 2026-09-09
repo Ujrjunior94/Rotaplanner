@@ -21,6 +21,7 @@ import {
   Calculator,
 } from 'lucide-react';
 import { RecalculateRecordsModal } from './RecalculateRecordsModal';
+import { DashboardCardsCustomizer } from './DashboardCardsCustomizer';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -165,6 +166,11 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      {/* PERSONALIZAÇÃO DE CARDS DO DASHBOARD (DRAG AND DROP & TOGGLE) */}
+      <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-2xl space-y-4">
+        <DashboardCardsCustomizer />
+      </div>
 
       {/* BACKUP & EXPORTAÇÃO */}
       <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-2xl space-y-4">

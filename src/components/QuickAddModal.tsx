@@ -19,12 +19,14 @@ import {
   Plus,
   Trash2,
   Settings2,
+  Calendar,
 } from 'lucide-react';
 
 interface QuickAddModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialTab?: 'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance';
+  initialDate?: string;
   initialFuelData?: {
     liters?: number;
     pricePerLiter?: number;
@@ -37,12 +39,14 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   isOpen,
   onClose,
   initialTab = 'earning',
+  initialDate,
   initialFuelData,
 }) => {
   const {
     vehicle,
     profile,
     activeSession,
+    plannerEvents,
     addEarning,
     addExpense,
     addFuelRecord,
@@ -55,6 +59,8 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
 
   const [activeTab, setActiveTab] = useState<'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance'>(initialTab);
   const [successMessage, setSuccessMessage] = useState('');
+  const [selectedDate, setSelectedDate] = useState<string>(() => initialDate || new Date().toISOString().split('T')[0]);
+  const [syncWithPlanner, setSyncWithPlanner] = useState(true);
 
   // 1. GANHO
   const [earnPlatform, setEarnPlatform] = useState<PlatformType>('Uber');
@@ -94,6 +100,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     return calcFuelParity(eth, gas, vehicle.avgConsumption || 12.5, isFlexVehicle);
   }, [pumpGasPrice, pumpEthPrice, vehicle]);
 
+  // Evento correspondente no Planner para a data selecionada
+  const targetPlannerEvent = useMemo(() => {
+    return plannerEvents.find(e => e.date === selectedDate);
+  }, [plannerEvents, selectedDate]);
+
   // Função para aplicar recomendação com 1 clique
   const applyRecommendedFuel = (type: 'Etanol' | 'Gasolina Comum', price: number) => {
     setFuelType(type);
@@ -111,6 +122,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setActiveTab(initialTab);
+      if (initialDate) {
+        setSelectedDate(initialDate);
+      } else {
+        setSelectedDate(new Date().toISOString().split('T')[0]);
+      }
       if (initialFuelData) {
         if (initialFuelData.liters) setFuelLiters(initialFuelData.liters.toString());
         if (initialFuelData.pricePerLiter) setFuelPricePerLiter(initialFuelData.pricePerLiter.toFixed(2));
@@ -120,7 +136,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         }
       }
     }
-  }, [isOpen, initialTab, initialFuelData]);
+  }, [isOpen, initialTab, initialDate, initialFuelData]);
 
   // 4. DESPESA
   const [expCategory, setExpCategory] = useState<ExpenseCategory>('Alimentação');
@@ -197,6 +213,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     const amount = parseFloat(earnAmount) || 0;
     const tip = parseFloat(earnTip) || 0;
     const trips = parseInt(earnTrips) || 1;
+    const nowTime = new Date().toISOString().slice(11);
 
     addEarning({
       platform: earnPlatform,
@@ -204,9 +221,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       tip,
       tripsCount: trips,
       notes: earnNotes,
+      date: selectedDate,
+      timestamp: `${selectedDate}T${nowTime}`,
       sessionId: activeSession?.id,
     });
-    showNotification(`Ganho de ${formatCurrency(amount + tip)} registrado!`);
+    showNotification(`Ganho de ${formatCurrency(amount + tip)} salvo e conectado ao Planner!`);
   };
 
   const handleRideSubmit = (e: React.FormEvent) => {
@@ -214,6 +233,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     const amount = parseFloat(rideAmount) || 0;
     const distanceKm = parseFloat(rideKm) || 0;
     const durationMinutes = parseFloat(rideMinutes) || 0;
+    const nowTime = new Date().toISOString().slice(11);
 
     addEarning({
       platform: ridePlatform,
@@ -223,9 +243,11 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       distanceKm,
       durationMinutes,
       notes: `Corrida individual: ${distanceKm}km em ${durationMinutes}min`,
+      date: selectedDate,
+      timestamp: `${selectedDate}T${nowTime}`,
       sessionId: activeSession?.id,
     });
-    showNotification(`Corrida de ${formatCurrency(amount)} salva!`);
+    showNotification(`Corrida de ${formatCurrency(amount)} salva e conectada ao Planner!`);
   };
 
   const handleFuelSubmit = (e: React.FormEvent) => {
@@ -242,9 +264,9 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       pricePerLiter,
       totalAmount: total,
       odometer: odo,
-      date: new Date().toISOString().split('T')[0],
+      date: selectedDate,
     });
-    showNotification(`Abastecimento de ${formatCurrency(total)} registrado!`);
+    showNotification(`Abastecimento de ${formatCurrency(total)} salvo e conectado ao Planner!`);
   };
 
   const handleExpenseSubmit = (e: React.FormEvent) => {
@@ -254,10 +276,10 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       category: expCategory,
       amount,
       description: expDesc || expCategory,
-      date: new Date().toISOString().split('T')[0],
+      date: selectedDate,
       sessionId: activeSession?.id,
     });
-    showNotification(`Despesa de ${formatCurrency(amount)} adicionada!`);
+    showNotification(`Despesa de ${formatCurrency(amount)} salva e conectada ao Planner!`);
   };
 
   const handleMaintSubmit = (e: React.FormEvent) => {
@@ -272,10 +294,10 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
       amount,
       odometer: odo,
       nextOdometer: nextOdo,
-      date: new Date().toISOString().split('T')[0],
+      date: selectedDate,
       completed: true,
     });
-    showNotification(`Manutenção salva com alerta para ${nextOdo} km!`);
+    showNotification(`Manutenção salva e conectada ao Planner com alerta para ${nextOdo} km!`);
   };
 
   // Cálculo de combustível em tempo real
@@ -309,7 +331,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
             </div>
             <div>
               <h3 className="text-base font-black text-white">LANÇAMENTO RÁPIDO</h3>
-              <p className="text-[11px] text-slate-400">1 toque para registrar qualquer movimentação</p>
+              <p className="text-[11px] text-slate-400">1 toque para registrar qualquer movimentação no Planner</p>
             </div>
           </div>
           <button
@@ -318,6 +340,83 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
           >
             <X className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* BARRA DE DATA E CONEXÃO COM O PLANNER */}
+        <div className="bg-slate-950/70 border border-emerald-500/25 p-3 rounded-2xl space-y-2">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
+              <Calendar className="w-4 h-4 text-emerald-400" />
+              <span>Data do Lançamento:</span>
+            </div>
+            
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
+                  selectedDate === new Date().toISOString().split('T')[0]
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black'
+                    : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'
+                }`}
+              >
+                Hoje
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const y = new Date();
+                  y.setDate(y.getDate() - 1);
+                  setSelectedDate(y.toISOString().split('T')[0]);
+                }}
+                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition ${
+                  selectedDate === (() => {
+                    const y = new Date();
+                    y.setDate(y.getDate() - 1);
+                    return y.toISOString().split('T')[0];
+                  })()
+                    ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black'
+                    : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'
+                }`}
+              >
+                Ontem
+              </button>
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bg-slate-900 border border-white/20 text-white rounded-lg px-2 py-1 text-xs font-bold focus:outline-none focus:border-emerald-500"
+              />
+            </div>
+          </div>
+
+          {/* STATUS DA DATA NO PLANNER */}
+          <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-white/10 gap-2">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              {targetPlannerEvent ? (
+                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md font-bold text-[10px] ${
+                  targetPlannerEvent.type === 'work'
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : targetPlannerEvent.type === 'off'
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                }`}>
+                  <span className="w-1.5 h-1.5 rounded-full bg-current inline-block" />
+                  Planner: {targetPlannerEvent.type === 'work' ? `Meta R$ ${targetPlannerEvent.targetEarnings}` : targetPlannerEvent.type === 'off' ? 'Dia de Folga' : targetPlannerEvent.type}
+                </span>
+              ) : (
+                <span className="text-slate-400 flex items-center gap-1 text-[10px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-500 inline-block" />
+                  Sem turno agendado (criará escala realizada)
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 text-[10px] font-semibold text-emerald-400">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Conectado ao Planner</span>
+            </div>
+          </div>
         </div>
 
         {/* 5 BOTÕES GRANDES DE 1 TOQUE (SECTION 8) */}

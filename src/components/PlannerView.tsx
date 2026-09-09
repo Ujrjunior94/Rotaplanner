@@ -44,7 +44,11 @@ import {
 
 interface PlannerViewProps {
   onOpenFuelAdvisor?: () => void;
-  onOpenQuickModal?: (tab?: 'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance') => void;
+  onOpenQuickModal?: (
+    tab?: 'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance',
+    fuelData?: { liters?: number; pricePerLiter?: number; totalAmount?: number; fuelType?: string },
+    initialDate?: string
+  ) => void;
   onOpenShiftModal?: () => void;
 }
 
@@ -90,10 +94,12 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
     activateStrategy,
     expenseCategories,
     customExpenseCategories,
+    syncAllLaunchesToPlanner,
   } = useDriver();
 
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'transactions' | 'recurring'>('week');
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   
   // Modais
   const [showEventModal, setShowEventModal] = useState(false);
@@ -496,16 +502,23 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
     setShowLaunchModal(false);
   };
 
+  // Sincronizar todos os lançamentos ao Planner
+  const handleSyncAll = () => {
+    syncAllLaunchesToPlanner();
+    setSyncFeedback('✅ Todos os lançamentos (ganhos, abastecimentos, despesas e turnos) foram sincronizados ao Planner!');
+    setTimeout(() => setSyncFeedback(null), 3500);
+  };
+
   // Excluir lançamento
   const handleDeleteTransaction = (tx: PlannerTransactionItem) => {
     if (!tx.canDelete || !tx.originalId) return;
-    if (window.confirm(`Tem certeza que deseja excluir o lançamento "${tx.title}" de ${formatCurrency(tx.amount)}?`)) {
-      if (tx.kind === 'earning') {
-        deleteEarning(tx.originalId);
-      } else {
-        deleteExpense(tx.originalId);
-      }
+    if (tx.kind === 'earning') {
+      deleteEarning(tx.originalId);
+    } else {
+      deleteExpense(tx.originalId);
     }
+    setSyncFeedback(`Lançamento "${tx.title}" de ${formatCurrency(tx.amount)} excluído e Planner atualizado.`);
+    setTimeout(() => setSyncFeedback(null), 3000);
   };
 
   const handleSaveEvent = (e: React.FormEvent) => {
@@ -662,24 +675,51 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
             </div>
           </div>
 
-          {/* BOTÕES DE AÇÃO RÁPIDA DE LANÇAMENTO */}
+          {/* BOTÕES DE AÇÃO RÁPIDA DE LANÇAMENTO CONECTADOS AO PLANNER */}
           <div className="flex flex-wrap items-center gap-2">
             <button
-              onClick={() => handleOpenNewLaunch('earning', selectedDate)}
+              onClick={() => onOpenQuickModal ? onOpenQuickModal('earning', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
               className="text-xs font-bold text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 px-2.5 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-1.5 transition shadow-sm"
-              title="Lançar novo ganho ou corrida para a data selecionada"
+              title="Lançar novo ganho com 1 toque conectado ao Planner"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-400" />
               <span>+ Ganho</span>
             </button>
 
             <button
-              onClick={() => handleOpenNewLaunch('expense', selectedDate)}
+              onClick={() => onOpenQuickModal ? onOpenQuickModal('ride', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
+              className="text-xs font-bold text-teal-300 bg-teal-500/20 hover:bg-teal-500/30 px-2.5 py-1.5 rounded-xl border border-teal-500/30 flex items-center gap-1.5 transition shadow-sm"
+              title="Lançar corrida individual conectada ao Planner"
+            >
+              <Car className="w-3.5 h-3.5 text-teal-400" />
+              <span>+ Corrida</span>
+            </button>
+
+            <button
+              onClick={() => onOpenQuickModal ? onOpenQuickModal('fuel', undefined, selectedDate) : handleOpenNewLaunch('expense', selectedDate)}
+              className="text-xs font-bold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 px-2.5 py-1.5 rounded-xl border border-amber-500/30 flex items-center gap-1.5 transition shadow-sm"
+              title="Lançar abastecimento com cálculo de consumo conectado ao Planner"
+            >
+              <Fuel className="w-3.5 h-3.5 text-amber-400" />
+              <span>+ Posto</span>
+            </button>
+
+            <button
+              onClick={() => onOpenQuickModal ? onOpenQuickModal('expense', undefined, selectedDate) : handleOpenNewLaunch('expense', selectedDate)}
               className="text-xs font-bold text-rose-300 bg-rose-500/20 hover:bg-rose-500/30 px-2.5 py-1.5 rounded-xl border border-rose-500/30 flex items-center gap-1.5 transition shadow-sm"
-              title="Lançar nova despesa para a data selecionada"
+              title="Lançar despesa conectada ao Planner"
             >
               <Plus className="w-3.5 h-3.5 text-rose-400" />
               <span>+ Despesa</span>
+            </button>
+
+            <button
+              onClick={handleSyncAll}
+              className="text-xs font-bold text-cyan-300 bg-cyan-500/15 hover:bg-cyan-500/25 px-2.5 py-1.5 rounded-xl border border-cyan-500/30 flex items-center gap-1.5 transition"
+              title="Recalcular e sincronizar todos os lançamentos históricos e turnos com o Planner"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden sm:inline">Sincronizar Lançamentos</span>
             </button>
 
             {onOpenFuelAdvisor && (
@@ -699,7 +739,8 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                 onClick={() => {
                   activateStrategy(activeStrategy.id, true);
                   applyRecurringScheduleToRange(currentWeekDays[0], 7);
-                  alert(`Escala da estratégia "${activeStrategy.name}" aplicada com sucesso a esta semana!`);
+                  setSyncFeedback(`Escala da estratégia "${activeStrategy.name}" aplicada com sucesso a esta semana!`);
+                  setTimeout(() => setSyncFeedback(null), 3500);
                 }}
                 className="text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 px-2.5 py-1.5 rounded-xl border border-emerald-500/30 flex items-center gap-1.5 transition"
                 title={`Carrega os turnos e metas da estratégia ativa (${activeStrategy.name})`}
@@ -720,6 +761,22 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* FEEDBACK DE SINCRONIZAÇÃO COM O PLANNER */}
+      {syncFeedback && (
+        <div className="bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{syncFeedback}</span>
+          </div>
+          <button
+            onClick={() => setSyncFeedback(null)}
+            className="text-slate-400 hover:text-white text-xs font-black ml-2"
+          >
+            ✕
+          </button>
         </div>
       )}
 
@@ -937,17 +994,33 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                       </div>
                     )}
 
-                    {/* BOTÃO RÁPIDO PARA VER DETALHES DO DIA */}
-                    <div className="pt-1 flex items-center justify-between">
+                    {/* BOTÃO RÁPIDO PARA VER DETALHES DO DIA E LANÇAR */}
+                    <div className="pt-1 flex items-center justify-between gap-1">
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
                           setSelectedDate(dateStr);
                           setViewMode('day');
                         }}
-                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold hover:underline"
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold hover:underline truncate"
                       >
-                        Ver lançamentos ({dayFin.allTransactions.length}) →
+                        Lançamentos ({dayFin.allTransactions.length}) →
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (onOpenQuickModal) {
+                            onOpenQuickModal('earning', undefined, dateStr);
+                          } else {
+                            handleOpenNewLaunch('earning', dateStr);
+                          }
+                        }}
+                        className="text-[9px] font-black text-slate-200 bg-white/10 hover:bg-emerald-500 hover:text-slate-950 px-1.5 py-0.5 rounded transition flex items-center gap-0.5 shrink-0"
+                        title={`Novo lançamento para ${dateStr} conectado ao Planner`}
+                      >
+                        <Plus className="w-2.5 h-2.5" /> Lançar
                       </button>
                     </div>
                   </div>
@@ -971,10 +1044,15 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                 <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-3xl shadow-xl space-y-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div>
-                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                        EXTRATO DO DIA SELECIONADO
-                      </span>
-                      <h3 className="text-xl sm:text-2xl font-black text-white">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          EXTRATO DO DIA SELECIONADO
+                        </span>
+                        <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                          <CheckCircle2 className="w-3 h-3" /> Conectado ao Planner
+                        </span>
+                      </div>
+                      <h3 className="text-xl sm:text-2xl font-black text-white mt-1">
                         {new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-BR', {
                           weekday: 'long',
                           day: '2-digit',
@@ -984,7 +1062,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                       </h3>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={() => openNewEventForDate(selectedDate)}
                         className="bg-white/10 hover:bg-white/15 text-slate-200 font-bold px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 border border-white/10 transition"
@@ -994,19 +1072,48 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                       </button>
 
                       <button
-                        onClick={() => handleOpenNewLaunch('earning', selectedDate)}
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('earning', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
                         className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition"
+                        title="Lançar ganho conectado ao Planner"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        + Lançar Ganho
+                        + Ganho
                       </button>
 
                       <button
-                        onClick={() => handleOpenNewLaunch('expense', selectedDate)}
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('ride', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
+                        className="bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 border border-teal-500/30 transition"
+                        title="Lançar corrida conectada ao Planner"
+                      >
+                        <Car className="w-3.5 h-3.5 text-teal-400" />
+                        + Corrida
+                      </button>
+
+                      <button
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('fuel', undefined, selectedDate) : handleOpenNewLaunch('expense', selectedDate)}
+                        className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 border border-amber-500/30 transition"
+                        title="Lançar abastecimento no posto conectado ao Planner"
+                      >
+                        <Fuel className="w-3.5 h-3.5 text-amber-400" />
+                        + Posto
+                      </button>
+
+                      <button
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('expense', undefined, selectedDate) : handleOpenNewLaunch('expense', selectedDate)}
                         className="bg-rose-500 hover:bg-rose-400 text-white font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20 transition"
+                        title="Lançar despesa conectada ao Planner"
                       >
                         <Plus className="w-3.5 h-3.5" />
-                        + Lançar Despesa
+                        + Despesa
+                      </button>
+
+                      <button
+                        onClick={handleSyncAll}
+                        className="bg-white/5 hover:bg-cyan-500/20 text-cyan-300 font-bold px-2.5 py-1.5 rounded-xl text-xs flex items-center gap-1 border border-cyan-500/25 transition"
+                        title="Sincronizar todos os lançamentos com o Planner"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="hidden md:inline">Sincronizar</span>
                       </button>
                     </div>
                   </div>
@@ -1099,17 +1206,25 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
 
                 {/* LISTA 1: LANÇAMENTOS DE GANHOS (RECEITAS) */}
                 <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-3xl shadow-xl space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
                       <ArrowUpRight className="w-4 h-4 text-emerald-400" />
                       LANÇAMENTOS DE GANHOS ({dayFin.earningsItems.length})
                     </h4>
-                    <button
-                      onClick={() => handleOpenNewLaunch('earning', selectedDate)}
-                      className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Adicionar ganho
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('ride', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
+                        className="text-xs font-bold text-teal-300 hover:text-teal-200 bg-teal-500/10 px-2.5 py-1 rounded-lg border border-teal-500/20 flex items-center gap-1"
+                      >
+                        <Car className="w-3 h-3" /> + Corrida
+                      </button>
+                      <button
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('earning', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
+                        className="text-xs font-bold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20 flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> + Ganho
+                      </button>
+                    </div>
                   </div>
 
                   {dayFin.earningsItems.length > 0 ? (
@@ -1124,10 +1239,13 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                               <DollarSign className="w-5 h-5 text-emerald-400" />
                             </div>
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-black text-white">{tx.title}</span>
                                 <span className="text-[10px] font-bold bg-white/10 text-slate-300 px-2 py-0.5 rounded-full">
                                   {tx.categoryOrPlatform}
+                                </span>
+                                <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
+                                  <CheckCircle2 className="w-2.5 h-2.5" /> Planner
                                 </span>
                                 {tx.time && (
                                   <span className="text-[10px] text-slate-400 flex items-center gap-0.5">
@@ -1164,7 +1282,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                     <div className="text-center py-6 border border-dashed border-white/10 rounded-2xl">
                       <p className="text-xs text-slate-400 mb-2">Nenhum ganho lançado para este dia ainda.</p>
                       <button
-                        onClick={() => handleOpenNewLaunch('earning', selectedDate)}
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('earning', undefined, selectedDate) : handleOpenNewLaunch('earning', selectedDate)}
                         className="text-xs font-bold text-emerald-400 hover:text-emerald-300 inline-flex items-center gap-1"
                       >
                         <Plus className="w-3.5 h-3.5" /> Registrar ganho agora
@@ -1175,17 +1293,25 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
 
                 {/* LISTA 2: LANÇAMENTOS DE DESPESAS (SAÍDAS) */}
                 <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-3xl shadow-xl space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <h4 className="text-sm font-black text-white uppercase tracking-wider flex items-center gap-2">
                       <ArrowDownRight className="w-4 h-4 text-rose-400" />
                       LANÇAMENTOS DE DESPESAS ({dayFin.expensesItems.length})
                     </h4>
-                    <button
-                      onClick={() => handleOpenNewLaunch('expense', selectedDate)}
-                      className="text-xs font-bold text-rose-400 hover:text-rose-300 flex items-center gap-1"
-                    >
-                      <Plus className="w-3.5 h-3.5" /> Adicionar despesa
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('fuel', undefined, selectedDate) : handleOpenNewLaunch('expense', selectedDate)}
+                        className="text-xs font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/20 flex items-center gap-1"
+                      >
+                        <Fuel className="w-3 h-3" /> + Posto
+                      </button>
+                      <button
+                        onClick={() => onOpenQuickModal ? onOpenQuickModal('expense', undefined, selectedDate) : handleOpenNewLaunch('expense', selectedDate)}
+                        className="text-xs font-bold text-rose-400 hover:text-rose-300 bg-rose-500/10 px-2.5 py-1 rounded-lg border border-rose-500/20 flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" /> + Despesa
+                      </button>
+                    </div>
                   </div>
 
                   {dayFin.expensesItems.length > 0 ? (
@@ -1200,10 +1326,13 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                               {getCategoryIcon(tx.categoryOrPlatform)}
                             </div>
                             <div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-black text-white">{tx.title}</span>
                                 <span className="text-[10px] font-bold bg-white/10 text-slate-300 px-2 py-0.5 rounded-full">
                                   {tx.categoryOrPlatform}
+                                </span>
+                                <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
+                                  <CheckCircle2 className="w-2.5 h-2.5" /> Planner
                                 </span>
                               </div>
                               {tx.notes && (
@@ -1344,18 +1473,37 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={() => handleOpenNewLaunch('earning')}
+                  onClick={() => onOpenQuickModal ? onOpenQuickModal('earning') : handleOpenNewLaunch('earning')}
                   className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20"
                 >
                   <Plus className="w-3.5 h-3.5" /> + Ganho
                 </button>
                 <button
-                  onClick={() => handleOpenNewLaunch('expense')}
+                  onClick={() => onOpenQuickModal ? onOpenQuickModal('ride') : handleOpenNewLaunch('earning')}
+                  className="bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 border border-teal-500/30"
+                >
+                  <Car className="w-3.5 h-3.5 text-teal-400" /> + Corrida
+                </button>
+                <button
+                  onClick={() => onOpenQuickModal ? onOpenQuickModal('fuel') : handleOpenNewLaunch('expense')}
+                  className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 border border-amber-500/30"
+                >
+                  <Fuel className="w-3.5 h-3.5 text-amber-400" /> + Posto
+                </button>
+                <button
+                  onClick={() => onOpenQuickModal ? onOpenQuickModal('expense') : handleOpenNewLaunch('expense')}
                   className="bg-rose-500 hover:bg-rose-400 text-white font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-rose-500/20"
                 >
                   <Plus className="w-3.5 h-3.5" /> + Despesa
+                </button>
+                <button
+                  onClick={handleSyncAll}
+                  className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 font-black px-3 py-1.5 rounded-xl text-xs flex items-center gap-1.5 border border-cyan-500/30"
+                  title="Recalcular e sincronizar todos os lançamentos ao Planner"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-cyan-400" /> Sincronizar Tudo
                 </button>
               </div>
             </div>
@@ -1466,7 +1614,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                       </div>
 
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-xs font-black text-white">{tx.title}</span>
                           <span
                             className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
@@ -1476,6 +1624,9 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
                             }`}
                           >
                             {tx.categoryOrPlatform}
+                          </span>
+                          <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/15 border border-emerald-500/25 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5" /> Planner
                           </span>
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-2">

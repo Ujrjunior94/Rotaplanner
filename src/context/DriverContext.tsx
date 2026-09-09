@@ -4,6 +4,7 @@ import {
   Vehicle,
   WorkSession,
   PlannerEvent,
+  PlannerEventType,
   RecurringScheduleDay,
   EarningItem,
   ExpenseItem,
@@ -12,8 +13,11 @@ import {
   DriverAlert,
   PlatformType,
   DriverStrategy,
+  DashboardCardConfig,
+  DashboardCardId,
 } from '../types';
 import { defaultStrategyPresets } from '../data/defaultStrategies';
+import { DEFAULT_DASHBOARD_CARDS } from '../data/defaultDashboardCards';
 import {
   RecalculationOptions,
   RecalculationSummary,
@@ -64,6 +68,13 @@ interface DriverContextType {
   addCustomExpenseCategory: (category: string) => void;
   removeCustomExpenseCategory: (category: string) => void;
   resetCustomExpenseCategories: () => void;
+
+  // Dashboard Customization
+  dashboardCards: DashboardCardConfig[];
+  updateDashboardCards: (cards: DashboardCardConfig[]) => void;
+  toggleDashboardCard: (id: DashboardCardId) => void;
+  reorderDashboardCards: (sourceIndex: number, destinationIndex: number) => void;
+  resetDashboardCards: () => void;
   
   // Actions
   updateProfile: (data: Partial<UserProfile>) => void;
@@ -112,11 +123,12 @@ interface DriverContextType {
   setRecurringSchedule: (schedule: RecurringScheduleDay[]) => void;
   applyRecurringScheduleToRange: (startDateStr: string, daysCount: number) => void;
   duplicateScheduleToWeek: (sourceWeekStartDate: string, targetWeekStartDate: string) => void;
+  syncAllLaunchesToPlanner: () => void;
   
   // Transactions
-  addEarning: (earning: Omit<EarningItem, 'id' | 'timestamp'>) => void;
+  addEarning: (earning: Omit<EarningItem, 'id' | 'timestamp'> & { timestamp?: string; date?: string }) => void;
   deleteEarning: (id: string) => void;
-  addExpense: (expense: Omit<ExpenseItem, 'id'>) => void;
+  addExpense: (expense: Omit<ExpenseItem, 'id'> & { date?: string }) => void;
   deleteExpense: (id: string) => void;
   addFuelRecord: (fuel: Omit<FuelRecord, 'id'>) => void;
   deleteFuelRecord: (id: string) => void;
@@ -292,12 +304,76 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCustomExpenseCategories([]);
   };
 
+  // Configuração personalizada de cards do Dashboard
+  const [dashboardCards, setDashboardCards] = useState<DashboardCardConfig[]>(() => {
+    // 1. Verificar no profile salvo
+    const savedProfile = localStorage.getItem('@driver_profile_v2');
+    if (savedProfile) {
+      try {
+        const parsed = JSON.parse(savedProfile);
+        if (parsed.dashboardCards && Array.isArray(parsed.dashboardCards) && parsed.dashboardCards.length > 0) {
+          const cleaned = parsed.dashboardCards.filter((c: any) => c.id !== 'smart_tips');
+          const existingIds = new Set(cleaned.map((c: any) => c.id));
+          const merged = [...cleaned];
+          DEFAULT_DASHBOARD_CARDS.forEach(defCard => {
+            if (!existingIds.has(defCard.id)) merged.push(defCard);
+          });
+          return merged;
+        }
+      } catch (e) {
+        console.error('Erro ao ler dashboardCards do profile:', e);
+      }
+    }
+    // 2. Verificar localStorage direto
+    const savedCards = localStorage.getItem('@driver_dashboard_cards_v1');
+    if (savedCards) {
+      try {
+        const parsed = JSON.parse(savedCards);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.filter((c: any) => c.id !== 'smart_tips');
+          const existingIds = new Set(cleaned.map((c: any) => c.id));
+          const merged = [...cleaned];
+          DEFAULT_DASHBOARD_CARDS.forEach(defCard => {
+            if (!existingIds.has(defCard.id)) merged.push(defCard);
+          });
+          return merged;
+        }
+      } catch (e) {
+        console.error('Erro ao ler dashboardCards salvo:', e);
+      }
+    }
+    return DEFAULT_DASHBOARD_CARDS;
+  });
+
+  const updateDashboardCards = (cards: DashboardCardConfig[]) => {
+    setDashboardCards(cards);
+  };
+
+  const toggleDashboardCard = (id: DashboardCardId) => {
+    setDashboardCards(prev =>
+      prev.map(card => (card.id === id ? { ...card, visible: !card.visible } : card))
+    );
+  };
+
+  const reorderDashboardCards = (sourceIndex: number, destinationIndex: number) => {
+    setDashboardCards(prev => {
+      const result = Array.from(prev);
+      const [removed] = result.splice(sourceIndex, 1);
+      result.splice(destinationIndex, 0, removed);
+      return result;
+    });
+  };
+
+  const resetDashboardCards = () => {
+    setDashboardCards(DEFAULT_DASHBOARD_CARDS);
+  };
+
   // Estratégia ativa atual
   const activeStrategy = strategies.find(s => s.isActive) || strategies[0] || null;
 
   // Salvar no localStorage de forma contínua
   useEffect(() => {
-    localStorage.setItem('@driver_profile_v2', JSON.stringify(profile));
+    localStorage.setItem('@driver_profile_v2', JSON.stringify({ ...profile, dashboardCards }));
     localStorage.setItem('@driver_vehicle_v2', JSON.stringify(vehicle));
     localStorage.setItem('@driver_sessions_v2', JSON.stringify(sessions));
     localStorage.setItem('@driver_planner_v2', JSON.stringify(plannerEvents));
@@ -310,7 +386,8 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.setItem('@driver_strategies_v2', JSON.stringify(strategies));
     localStorage.setItem('@driver_custom_expense_cats_v2', JSON.stringify(customExpenseCategories));
     localStorage.setItem('@driver_is_demo_v2', String(isDemoData));
-  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, customExpenseCategories, isDemoData]);
+    localStorage.setItem('@driver_dashboard_cards_v1', JSON.stringify(dashboardCards));
+  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, customExpenseCategories, isDemoData, dashboardCards]);
 
   // Checagem proativa de alertas
   useEffect(() => {
@@ -421,22 +498,43 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setSessions(prev => prev.map(s => (s.id === activeSession.id ? finished : s)));
     setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, safeEndKm) }));
 
-    // Atualiza evento do planner do dia se houver:
+    // Atualiza ou cria evento do planner do dia
     // Apenas as despesas diretas desembolsadas entram em realizedExpenses; o combustível gasto entra em realizedReserves
     const todayStr = activeSession.startTime.split('T')[0];
-    setPlannerEvents(prev =>
-      prev.map(p =>
-        p.date === todayStr
-          ? {
-              ...p,
-              realizedGross: gross + tips,
-              realizedExpenses: (fuelExp || 0) + (otherExp || 0),
-              realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
-              realizedTrips: trips,
-            }
-          : p
-      )
-    );
+    setPlannerEvents(prev => {
+      const existing = prev.find(p => p.date === todayStr);
+      if (existing) {
+        return prev.map(p =>
+          p.date === todayStr
+            ? {
+                ...p,
+                realizedGross: (p.realizedGross || 0) + gross + tips,
+                realizedExpenses: (p.realizedExpenses || 0) + (fuelExp || 0) + (otherExp || 0),
+                realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
+                realizedTrips: (p.realizedTrips || 0) + trips,
+              }
+            : p
+        );
+      } else {
+        return [
+          ...prev,
+          {
+            id: 'ev-shift-' + todayStr + '-' + Date.now(),
+            date: todayStr,
+            type: 'work' as PlannerEventType,
+            startTime: activeSession.startTime.slice(11, 16),
+            endTime: new Date().toISOString().slice(11, 16),
+            targetEarnings: profile.dailyGoal || 250,
+            platforms: platformEarnings ? (Object.keys(platformEarnings) as PlatformType[]) : ['Uber', '99'],
+            notes: notes || 'Turno finalizado e sincronizado',
+            realizedGross: gross + tips,
+            realizedExpenses: (fuelExp || 0) + (otherExp || 0),
+            realizedReserves: calculatedFuelReserve + calculatedMaintReserve,
+            realizedTrips: trips,
+          },
+        ];
+      }
+    });
   };
 
   const addCompletedShift = (data: {
@@ -485,19 +583,40 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, data.endOdometer) }));
 
     const sessionDate = newSession.startTime.split('T')[0];
-    setPlannerEvents(prev =>
-      prev.map(p =>
-        p.date === sessionDate
-          ? {
-              ...p,
-              realizedGross: (p.realizedGross || 0) + data.grossEarnings + (data.tips || 0),
-              realizedExpenses: (p.realizedExpenses || 0) + (newSession.fuelExpenses + (data.otherExpenses || 0)),
-              realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
-              realizedTrips: (p.realizedTrips || 0) + (data.tripsCount || 1),
-            }
-          : p
-      )
-    );
+    setPlannerEvents(prev => {
+      const existing = prev.find(p => p.date === sessionDate);
+      if (existing) {
+        return prev.map(p =>
+          p.date === sessionDate
+            ? {
+                ...p,
+                realizedGross: (p.realizedGross || 0) + data.grossEarnings + (data.tips || 0),
+                realizedExpenses: (p.realizedExpenses || 0) + (newSession.fuelExpenses + (data.otherExpenses || 0)),
+                realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
+                realizedTrips: (p.realizedTrips || 0) + (data.tripsCount || 1),
+              }
+            : p
+        );
+      } else {
+        return [
+          ...prev,
+          {
+            id: 'ev-shift-' + sessionDate + '-' + Date.now(),
+            date: sessionDate,
+            type: 'work' as PlannerEventType,
+            startTime: newSession.startTime.slice(11, 16),
+            endTime: newSession.endTime ? newSession.endTime.slice(11, 16) : '18:00',
+            targetEarnings: profile.dailyGoal || 250,
+            platforms: data.platformEarnings ? (Object.keys(data.platformEarnings) as PlatformType[]) : ['Uber', '99'],
+            notes: data.notes || 'Turno finalizado e sincronizado',
+            realizedGross: data.grossEarnings + (data.tips || 0),
+            realizedExpenses: newSession.fuelExpenses + (data.otherExpenses || 0),
+            realizedReserves: calculatedFuelReserve + calculatedMaintReserve,
+            realizedTrips: data.tripsCount || 1,
+          },
+        ];
+      }
+    });
   };
 
   const cancelShift = () => {
@@ -750,11 +869,17 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     });
   };
 
-  const addEarning = (earning: Omit<EarningItem, 'id' | 'timestamp'>) => {
+  const addEarning = (earning: Omit<EarningItem, 'id' | 'timestamp'> & { timestamp?: string; date?: string }) => {
+    const timestamp = earning.timestamp 
+      ? earning.timestamp 
+      : earning.date 
+      ? `${earning.date}T${new Date().toISOString().slice(11)}` 
+      : new Date().toISOString();
+
     const item: EarningItem = {
       ...earning,
-      id: 'earn-' + Date.now(),
-      timestamp: new Date().toISOString(),
+      id: 'earn-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+      timestamp,
     };
     setEarnings(prev => [item, ...prev]);
 
@@ -772,16 +897,69 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         )
       );
     }
+
+    // Sincronizar com o Planner para a data do lançamento
+    const earningDate = timestamp.split('T')[0];
+    setPlannerEvents(prev => {
+      const existing = prev.find(p => p.date === earningDate);
+      if (existing) {
+        return prev.map(p =>
+          p.date === earningDate
+            ? {
+                ...p,
+                realizedGross: (p.realizedGross || 0) + item.amount + (item.tip || 0),
+                realizedTrips: (p.realizedTrips || 0) + (item.tripsCount || 1),
+                platforms: existing.platforms.includes(item.platform)
+                  ? existing.platforms
+                  : [...existing.platforms, item.platform],
+              }
+            : p
+        );
+      } else {
+        const newEvent: PlannerEvent = {
+          id: 'ev-auto-' + earningDate + '-' + Date.now(),
+          date: earningDate,
+          type: 'work' as PlannerEventType,
+          startTime: '06:00',
+          endTime: '14:00',
+          targetEarnings: profile.dailyGoal || 250,
+          platforms: [item.platform],
+          notes: 'Dia sincronizado com lançamentos de receitas',
+          realizedGross: item.amount + (item.tip || 0),
+          realizedExpenses: 0,
+          realizedReserves: 0,
+          realizedTrips: item.tripsCount || 1,
+        };
+        return [...prev, newEvent];
+      }
+    });
   };
 
   const deleteEarning = (id: string) => {
+    const itemToDelete = earnings.find(e => e.id === id);
     setEarnings(prev => prev.filter(e => e.id !== id));
+    if (itemToDelete && itemToDelete.timestamp) {
+      const earningDate = itemToDelete.timestamp.split('T')[0];
+      setPlannerEvents(prev =>
+        prev.map(p =>
+          p.date === earningDate
+            ? {
+                ...p,
+                realizedGross: Math.max(0, (p.realizedGross || 0) - itemToDelete.amount - (itemToDelete.tip || 0)),
+                realizedTrips: Math.max(0, (p.realizedTrips || 0) - (itemToDelete.tripsCount || 1)),
+              }
+            : p
+        )
+      );
+    }
   };
 
-  const addExpense = (exp: Omit<ExpenseItem, 'id'>) => {
+  const addExpense = (exp: Omit<ExpenseItem, 'id'> & { date?: string }) => {
+    const expDate = exp.date || new Date().toISOString().split('T')[0];
     const item: ExpenseItem = {
       ...exp,
-      id: 'exp-' + Date.now(),
+      id: 'exp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+      date: expDate,
     };
     setExpenses(prev => [item, ...prev]);
 
@@ -797,10 +975,144 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         )
       );
     }
+
+    // Sincronizar com o Planner para a data da despesa
+    setPlannerEvents(prev => {
+      const existing = prev.find(p => p.date === expDate);
+      if (existing) {
+        return prev.map(p =>
+          p.date === expDate
+            ? {
+                ...p,
+                realizedExpenses: (p.realizedExpenses || 0) + item.amount,
+              }
+            : p
+        );
+      } else {
+        const newEvent: PlannerEvent = {
+          id: 'ev-auto-' + expDate + '-' + Date.now(),
+          date: expDate,
+          type: 'work' as PlannerEventType,
+          startTime: '06:00',
+          endTime: '14:00',
+          targetEarnings: profile.dailyGoal || 250,
+          platforms: ['Uber'],
+          notes: 'Dia sincronizado com lançamentos de despesas',
+          realizedGross: 0,
+          realizedExpenses: item.amount,
+          realizedReserves: 0,
+          realizedTrips: 0,
+        };
+        return [...prev, newEvent];
+      }
+    });
   };
 
   const deleteExpense = (id: string) => {
+    const itemToDelete = expenses.find(e => e.id === id);
     setExpenses(prev => prev.filter(e => e.id !== id));
+    if (itemToDelete && itemToDelete.date) {
+      const expDate = itemToDelete.date.split('T')[0];
+      setPlannerEvents(prev =>
+        prev.map(p =>
+          p.date === expDate
+            ? {
+                ...p,
+                realizedExpenses: Math.max(0, (p.realizedExpenses || 0) - itemToDelete.amount),
+              }
+            : p
+        )
+      );
+    }
+  };
+
+  // Reconciliação e sincronização profunda de todos os lançamentos históricos com o Planner
+  const syncAllLaunchesToPlanner = () => {
+    const dateMap = new Map<string, {
+      gross: number;
+      expenses: number;
+      reserves: number;
+      trips: number;
+      platforms: Set<PlatformType>;
+    }>();
+
+    // 1. Processar sessões
+    sessions.forEach(s => {
+      if (!s.startTime) return;
+      const dateStr = s.startTime.split('T')[0];
+      const entry = dateMap.get(dateStr) || { gross: 0, expenses: 0, reserves: 0, trips: 0, platforms: new Set<PlatformType>() };
+      entry.gross += (s.grossEarnings || 0) + (s.tips || 0);
+      entry.expenses += (s.fuelExpenses || 0) + (s.otherExpenses || 0);
+      entry.reserves += (s.fuelReserve || 0) + (s.maintenanceReserve || 0);
+      entry.trips += (s.tripsCount || 0);
+      if (s.platformEarnings) {
+        Object.keys(s.platformEarnings).forEach(p => entry.platforms.add(p as PlatformType));
+      }
+      dateMap.set(dateStr, entry);
+    });
+
+    // 2. Processar ganhos avulsos que não foram gerados por espelhamento da sessão
+    earnings.forEach(e => {
+      if (!e.timestamp) return;
+      const dateStr = e.timestamp.split('T')[0];
+      const entry = dateMap.get(dateStr) || { gross: 0, expenses: 0, reserves: 0, trips: 0, platforms: new Set<PlatformType>() };
+      // Se não há sessões para a data ou se é ganho avulso sem sessionId
+      const hasSessionForDate = sessions.some(s => s.startTime && s.startTime.startsWith(dateStr));
+      if (!hasSessionForDate) {
+        entry.gross += (e.amount || 0) + (e.tip || 0);
+        entry.trips += (e.tripsCount || 1);
+      }
+      if (e.platform) entry.platforms.add(e.platform);
+      dateMap.set(dateStr, entry);
+    });
+
+    // 3. Processar despesas avulsas
+    expenses.forEach(e => {
+      if (!e.date) return;
+      const dateStr = e.date.split('T')[0];
+      const entry = dateMap.get(dateStr) || { gross: 0, expenses: 0, reserves: 0, trips: 0, platforms: new Set<PlatformType>() };
+      const isSessionExpense = e.sessionId && sessions.some(s => s.id === e.sessionId);
+      if (!isSessionExpense) {
+        entry.expenses += (e.amount || 0);
+      }
+      dateMap.set(dateStr, entry);
+    });
+
+    // 4. Atualiza os eventos do Planner
+    setPlannerEvents(prev => {
+      const updated = [...prev];
+      dateMap.forEach((metrics, dateStr) => {
+        const index = updated.findIndex(p => p.date === dateStr);
+        if (index >= 0) {
+          updated[index] = {
+            ...updated[index],
+            realizedGross: metrics.gross,
+            realizedExpenses: metrics.expenses,
+            realizedReserves: metrics.reserves,
+            realizedTrips: metrics.trips,
+            platforms: updated[index].platforms.length > 0
+              ? updated[index].platforms
+              : (metrics.platforms.size > 0 ? Array.from(metrics.platforms) : ['Uber', '99']),
+          };
+        } else if (metrics.gross > 0 || metrics.expenses > 0 || metrics.trips > 0) {
+          updated.push({
+            id: 'ev-sync-' + dateStr + '-' + Date.now(),
+            date: dateStr,
+            type: 'work' as PlannerEventType,
+            startTime: '06:00',
+            endTime: '14:00',
+            targetEarnings: profile.dailyGoal || 250,
+            platforms: metrics.platforms.size > 0 ? Array.from(metrics.platforms) : ['Uber', '99'],
+            notes: 'Turno sincronizado com lançamentos',
+            realizedGross: metrics.gross,
+            realizedExpenses: metrics.expenses,
+            realizedReserves: metrics.reserves,
+            realizedTrips: metrics.trips,
+          });
+        }
+      });
+      return updated;
+    });
   };
 
   const addFuelRecord = (fuel: Omit<FuelRecord, 'id'>) => {
@@ -1106,6 +1418,11 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (Array.isArray(data.customExpenseCategories)) {
         setCustomExpenseCategories(data.customExpenseCategories);
       }
+      if (Array.isArray(data.dashboardCards)) {
+        setDashboardCards(data.dashboardCards);
+      } else if (Array.isArray(data.profile?.dashboardCards)) {
+        setDashboardCards(data.profile.dashboardCards);
+      }
       setIsDemoData(false);
       return true;
     } catch {
@@ -1148,6 +1465,7 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         setRecurringSchedule,
         applyRecurringScheduleToRange,
         duplicateScheduleToWeek,
+        syncAllLaunchesToPlanner,
         addEarning,
         deleteEarning,
         addExpense,
@@ -1169,6 +1487,11 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         addCustomExpenseCategory,
         removeCustomExpenseCategory,
         resetCustomExpenseCategories,
+        dashboardCards,
+        updateDashboardCards,
+        toggleDashboardCard,
+        reorderDashboardCards,
+        resetDashboardCards,
       }}
     >
       {children}

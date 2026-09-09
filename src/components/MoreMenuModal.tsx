@@ -73,6 +73,14 @@ export const MoreMenuModal: React.FC<MoreMenuModalProps> = ({
       },
     },
     {
+      id: 'fuel' as MainTabType,
+      label: 'Tanque & Abastecimento (Painel Sandero)',
+      desc: 'Nível em 8 barras LCD estilo Renault Sandero, autonomia e abastecimentos',
+      icon: Fuel,
+      color: 'text-amber-400',
+      bg: 'bg-amber-500/10',
+    },
+    {
       id: 'reports' as MainTabType,
       label: 'Relatórios em PDF & Gráficos',
       desc: 'Emita demonstrativos semanais e mensais em PDF (A4)',

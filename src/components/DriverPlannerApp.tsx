@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar';
 import { BottomNav, MainTabType } from './BottomNav';
 import { DashboardView } from './DashboardView';
 import { PlannerView } from './PlannerView';
+import { FuelTankManagementView } from './FuelTankManagementView';
 import { RideAnalyzerView } from './RideAnalyzerView';
 import { VehicleCostView } from './VehicleCostView';
 import { GoalsView } from './GoalsView';
@@ -34,6 +35,7 @@ export const DriverPlannerApp: React.FC = () => {
   const [showDriverMode, setShowDriverMode] = useState(false);
   const [quickAddInitialTab, setQuickAddInitialTab] = useState<'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance'>('earning');
   const [quickAddFuelData, setQuickAddFuelData] = useState<{ liters?: number; pricePerLiter?: number; totalAmount?: number; fuelType?: string } | undefined>(undefined);
+  const [quickAddInitialDate, setQuickAddInitialDate] = useState<string | undefined>(undefined);
 
   // Handle PWA shortcuts from URL (e.g. /?tab=driver-mode or /?action=add-earning)
   useEffect(() => {
@@ -46,6 +48,8 @@ export const DriverPlannerApp: React.FC = () => {
       setShowDriverMode(true);
     } else if (tabParam === 'planner') {
       setActiveTab('planner');
+    } else if (tabParam === 'fuel' || tabParam === 'tanque') {
+      setActiveTab('fuel');
     } else if (tabParam === 'ride-analyzer' || tabParam === 'analyzer') {
       setActiveTab('analyzer');
     } else if (tabParam === 'reports') {
@@ -69,10 +73,12 @@ export const DriverPlannerApp: React.FC = () => {
 
   const handleOpenQuickAdd = (
     tab: 'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance' = 'earning',
-    fuelData?: { liters?: number; pricePerLiter?: number; totalAmount?: number; fuelType?: string }
+    fuelData?: { liters?: number; pricePerLiter?: number; totalAmount?: number; fuelType?: string },
+    initialDate?: string
   ) => {
     setQuickAddInitialTab(tab);
     setQuickAddFuelData(fuelData);
+    setQuickAddInitialDate(initialDate);
     setShowQuickAddModal(true);
   };
 
@@ -134,6 +140,13 @@ export const DriverPlannerApp: React.FC = () => {
             />
           )}
 
+          {activeTab === 'fuel' && (
+            <FuelTankManagementView
+              onOpenQuickFuel={() => handleOpenQuickAdd('fuel')}
+              onOpenFuelAdvisor={() => setShowFuelAdvisorModal(true)}
+            />
+          )}
+
           {activeTab === 'analyzer' && <RideAnalyzerView />}
 
           {activeTab === 'vehicle' && (
@@ -180,8 +193,12 @@ export const DriverPlannerApp: React.FC = () => {
       {/* MODAL LANÇAMENTO RÁPIDO (5 BOTÕES DE 1 TOQUE: GANHO, CORRIDA, POSTO, DESPESA, REVISÃO) */}
       <QuickAddModal
         isOpen={showQuickAddModal}
-        onClose={() => setShowQuickAddModal(false)}
+        onClose={() => {
+          setShowQuickAddModal(false);
+          setQuickAddInitialDate(undefined);
+        }}
         initialTab={quickAddInitialTab}
+        initialDate={quickAddInitialDate}
         initialFuelData={quickAddFuelData}
       />
 

@@ -11,6 +11,7 @@ import {
   Settings,
   Sparkles,
   Mic,
+  Fuel,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -29,6 +30,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const menuItems: { id: MainTabType; label: string; icon: React.ElementType; badge?: string }[] = [
     { id: 'dashboard', label: 'Início', icon: Home },
     { id: 'planner', label: 'Planner & Escalas', icon: Calendar },
+    { id: 'fuel', label: 'Tanque & Abastecimento', icon: Fuel, badge: 'Sandero' },
     { id: 'analyzer', label: 'Vale a Pena?', icon: Calculator, badge: 'Calculadora' },
     { id: 'vehicle', label: 'Custo do Carro', icon: Car },
     { id: 'goals', label: 'Metas & Progresso', icon: Target },

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Home, Calendar, PlusCircle, BarChart3, Menu } from 'lucide-react';
 
-export type MainTabType = 'dashboard' | 'planner' | 'analyzer' | 'vehicle' | 'goals' | 'reports' | 'insights' | 'settings';
+export type MainTabType = 'dashboard' | 'planner' | 'fuel' | 'analyzer' | 'vehicle' | 'goals' | 'reports' | 'insights' | 'settings';
 
 interface BottomNavProps {
   activeTab: MainTabType;
@@ -66,7 +66,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({
       <button
         onClick={onOpenMoreMenu}
         className={`flex flex-col items-center gap-0.5 py-1 px-2.5 rounded-xl transition ${
-          ['analyzer', 'vehicle', 'goals', 'insights', 'settings'].includes(activeTab)
+          ['fuel', 'analyzer', 'vehicle', 'goals', 'insights', 'settings'].includes(activeTab)
             ? 'text-emerald-400 font-bold'
             : 'text-slate-400 hover:text-slate-200'
         }`}

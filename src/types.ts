@@ -32,6 +32,27 @@ export type MaintenanceCategory =
   | 'Revisão Periódica'
   | 'Outros';
 
+export type DashboardCardId =
+  | 'cockpit_metrics'
+  | 'reserves_wallet'
+  | 'unit_efficiency'
+  | 'daily_goal'
+  | 'weekly_goal'
+  | 'next_service'
+  | 'fuel_advisor'
+  | 'sandero_fuel_gauge'
+  | 'performance_chart'
+  | 'smart_summary'
+  | 'recent_rides';
+
+export interface DashboardCardConfig {
+  id: DashboardCardId;
+  title: string;
+  description: string;
+  visible: boolean;
+  category?: 'financial' | 'goals' | 'vehicle' | 'insights' | 'history';
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -45,6 +66,7 @@ export interface UserProfile {
   platforms: PlatformType[];
   darkMode: boolean;
   onboardingCompleted: boolean;
+  dashboardCards?: DashboardCardConfig[];
 }
 
 export interface Vehicle {
@@ -146,6 +168,8 @@ export interface FuelRecord {
   totalAmount: number;
   odometer: number;
   date: string; // YYYY-MM-DD
+  isFullTank?: boolean;
+  notes?: string;
 }
 
 export interface MaintenanceRecord {
