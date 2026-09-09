@@ -22,6 +22,9 @@ import {
   ArrowDownRight,
   Calendar,
   Layers,
+  PiggyBank,
+  Wallet,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -69,7 +72,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return Math.max(fromSessions, fromItems) + fromActive;
   }, [todaySessions, todayExpensesItems, activeSession]);
 
-  const todayNetProfit = todayGross - todayExpenses;
+  // Reservas estratégicas para abastecimento futuro e manutenção
+  const todayFuelReserve = useMemo(() => {
+    return todaySessions.reduce((acc, s) => acc + (s.fuelReserve || 0), 0);
+  }, [todaySessions]);
+
+  const todayMaintReserve = useMemo(() => {
+    return todaySessions.reduce((acc, s) => acc + (s.maintenanceReserve || 0), 0);
+  }, [todaySessions]);
+
+  const todayTotalReserves = todayFuelReserve + todayMaintReserve;
+
+  // Saldo imediato em dinheiro no bolso hoje (Bruto - Despesas Diretas desembolsadas)
+  const todayImmediateBalance = todayGross - todayExpenses;
+
+  // Lucro líquido real (após guardar o valor para a reserva de abastecimento futuro e manutenção)
+  const todayNetProfit = todayGross - todayExpenses - todayTotalReserves;
 
   const todayTrips = useMemo(() => {
     const fromCompleted = todaySessions.reduce((acc, s) => acc + s.tripsCount, 0);
@@ -104,7 +122,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Estatísticas dos últimos 7 dias para o gráfico
   const last7DaysData = useMemo(() => {
-    const days: { dateStr: string; label: string; gross: number; expenses: number; net: number; trips: number; hours: number }[] = [];
+    const days: { dateStr: string; label: string; gross: number; expenses: number; reserves: number; net: number; trips: number; hours: number }[] = [];
     const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
     
     for (let i = 6; i >= 0; i--) {
@@ -116,6 +134,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       const daySessions = sessions.filter(s => s.startTime.startsWith(dateStr));
       const gross = daySessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
       const exp = daySessions.reduce((acc, s) => acc + s.fuelExpenses + s.otherExpenses, 0);
+      const res = daySessions.reduce((acc, s) => acc + (s.fuelReserve || 0) + (s.maintenanceReserve || 0), 0);
       const trips = daySessions.reduce((acc, s) => acc + s.tripsCount, 0);
       const hours = daySessions.reduce((acc, s) => {
         if (!s.endTime) return acc;
@@ -127,7 +146,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         label: i === 0 ? 'Hoje' : dayName,
         gross,
         expenses: exp,
-        net: gross - exp,
+        reserves: res,
+        net: gross - exp - res,
         trips,
         hours,
       });
@@ -217,10 +237,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* 2. DESPESAS HOJE */}
+        {/* 2. DESPESAS DIRETAS HOJE */}
         <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-rose-500/30 transition">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DESPESAS HOJE</span>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DESPESAS DIRETAS</span>
             <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
               <Fuel className="w-4 h-4" />
             </div>
@@ -229,14 +249,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {formatCurrency(todayExpenses)}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
-            Combustível + alimentação
+            Gastos pagos no turno
           </div>
         </div>
 
-        {/* 3. LUCRO LÍQUIDO */}
+        {/* 3. LUCRO LÍQUIDO REAL */}
         <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-white/30 transition">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">LUCRO LÍQUIDO</span>
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">LUCRO REAL</span>
             <div className="w-8 h-8 rounded-xl bg-white/10 text-white flex items-center justify-center">
               <TrendingUp className="w-4 h-4" />
             </div>
@@ -245,7 +265,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             {formatCurrency(todayNetProfit)}
           </div>
           <div className="text-[11px] font-bold text-emerald-400 mt-1">
-            {todayGross > 0 ? `${Math.round((todayNetProfit / todayGross) * 100)}% de margem no bolso` : 'Sem lançamentos'}
+            {todayGross > 0 ? `${Math.round((todayNetProfit / todayGross) * 100)}% margem líquida real` : 'Sem lançamentos'}
           </div>
         </div>
 
@@ -266,6 +286,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* BARRA DE RESERVA E CAIXA IMEDIATO */}
+      {todayTotalReserves > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center flex-shrink-0">
+              <PiggyBank className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="text-xs font-black text-amber-200 uppercase tracking-wide flex items-center gap-2 flex-wrap">
+                <span>Reserva para Abastecimento Futuro: {formatCurrency(todayFuelReserve)}</span>
+                {todayMaintReserve > 0 && (
+                  <span className="text-sky-300 font-bold">• Manutenção: {formatCurrency(todayMaintReserve)}</span>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-300">
+                Valor separado dos ganhos de hoje para cobrir o próximo abastecimento sem desfalcar seu lucro.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 self-start sm:self-auto">
+            <Wallet className="w-3.5 h-3.5 text-sky-400" />
+            <span className="text-[11px] text-slate-300">Saldo imediato em mãos:</span>
+            <strong className="text-xs font-black text-white font-mono">{formatCurrency(todayImmediateBalance)}</strong>
+          </div>
+        </div>
+      )}
 
       {/* LINHA DE INDICADORES DE EFICIÊNCIA UNITÁRIA */}
       <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 rounded-2xl grid grid-cols-3 gap-2 text-center divide-x divide-white/10">

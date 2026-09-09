@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import {
   UserProfile,
   Vehicle,
@@ -22,6 +22,26 @@ import {
   formatKm,
 } from '../utils/calc';
 
+export const DEFAULT_EXPENSE_CATEGORIES: string[] = [
+  'Alimentação',
+  'Combustível',
+  'Lavagem',
+  'Limpeza',
+  'Multas',
+  'Estacionamento',
+  'Pedágio',
+  'Internet',
+  'Seguro',
+  'IPVA',
+  'Documentação',
+  'Manutenção',
+  'Óleo',
+  'Freios',
+  'Pneus',
+  'Acessórios',
+  'Outros',
+];
+
 interface DriverContextType {
   profile: UserProfile;
   vehicle: Vehicle;
@@ -37,6 +57,13 @@ interface DriverContextType {
   isDemoData: boolean;
   strategies: DriverStrategy[];
   activeStrategy: DriverStrategy | null;
+
+  // Expense Categories
+  expenseCategories: string[];
+  customExpenseCategories: string[];
+  addCustomExpenseCategory: (category: string) => void;
+  removeCustomExpenseCategory: (category: string) => void;
+  resetCustomExpenseCategories: () => void;
   
   // Actions
   updateProfile: (data: Partial<UserProfile>) => void;
@@ -50,7 +77,8 @@ interface DriverContextType {
     fuelExp: number,
     otherExp: number,
     notes?: string,
-    platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>
+    platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>,
+    reserves?: { fuelReserve?: number; maintenanceReserve?: number }
   ) => void;
   addCompletedShift: (sessionData: {
     startTime?: string;
@@ -62,6 +90,8 @@ interface DriverContextType {
     tripsCount?: number;
     fuelExpenses?: number;
     otherExpenses?: number;
+    fuelReserve?: number;
+    maintenanceReserve?: number;
     notes?: string;
     platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
   }) => void;
@@ -223,6 +253,45 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return localStorage.getItem('@driver_is_demo_v2') === 'true';
   });
 
+  const [customExpenseCategories, setCustomExpenseCategories] = useState<string[]>(() => {
+    const saved = localStorage.getItem('@driver_custom_expense_cats_v2');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Erro ao ler categorias personalizadas:', e);
+      }
+    }
+    return [];
+  });
+
+  // Lista consolidada de categorias de despesa (padrão + personalizadas pelo motorista)
+  const expenseCategories = useMemo(() => {
+    const list = [...DEFAULT_EXPENSE_CATEGORIES, ...customExpenseCategories];
+    return Array.from(new Set(list.map(c => c.trim()))).filter(Boolean);
+  }, [customExpenseCategories]);
+
+  const addCustomExpenseCategory = (cat: string) => {
+    const trimmed = cat.trim();
+    if (!trimmed) return;
+    setCustomExpenseCategories(prev => {
+      const exists =
+        prev.some(c => c.toLowerCase() === trimmed.toLowerCase()) ||
+        DEFAULT_EXPENSE_CATEGORIES.some(c => c.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return prev;
+      return [...prev, trimmed];
+    });
+  };
+
+  const removeCustomExpenseCategory = (cat: string) => {
+    setCustomExpenseCategories(prev => prev.filter(c => c.toLowerCase() !== cat.toLowerCase()));
+  };
+
+  const resetCustomExpenseCategories = () => {
+    setCustomExpenseCategories([]);
+  };
+
   // Estratégia ativa atual
   const activeStrategy = strategies.find(s => s.isActive) || strategies[0] || null;
 
@@ -239,8 +308,9 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.setItem('@driver_maint_v2', JSON.stringify(maintenances));
     localStorage.setItem('@driver_alerts_v2', JSON.stringify(alerts));
     localStorage.setItem('@driver_strategies_v2', JSON.stringify(strategies));
+    localStorage.setItem('@driver_custom_expense_cats_v2', JSON.stringify(customExpenseCategories));
     localStorage.setItem('@driver_is_demo_v2', String(isDemoData));
-  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, isDemoData]);
+  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, customExpenseCategories, isDemoData]);
 
   // Checagem proativa de alertas
   useEffect(() => {
@@ -319,26 +389,40 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     fuelExp: number,
     otherExp: number,
     notes?: string,
-    platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>
+    platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>,
+    reserves?: { fuelReserve?: number; maintenanceReserve?: number }
   ) => {
     if (!activeSession) return;
+    const safeEndKm = Math.max(endKm, activeSession.startOdometer);
+    const kmDriven = Math.max(0, safeEndKm - activeSession.startOdometer);
+    const calculatedFuelReserve = reserves?.fuelReserve !== undefined
+      ? reserves.fuelReserve
+      : Math.round(((kmDriven / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89)) * 100) / 100;
+    const maintenanceRate = activeStrategy?.fuelAndMaintenancePlan.reserveMaintenancePerKm || 0.15;
+    const calculatedMaintReserve = reserves?.maintenanceReserve !== undefined
+      ? reserves.maintenanceReserve
+      : Math.round((kmDriven * maintenanceRate) * 100) / 100;
+
     const finished: WorkSession = {
       ...activeSession,
       endTime: new Date().toISOString(),
-      endOdometer: Math.max(endKm, activeSession.startOdometer),
+      endOdometer: safeEndKm,
       status: 'completed',
       grossEarnings: gross,
       tips,
       tripsCount: trips,
-      fuelExpenses: fuelExp,
-      otherExpenses: otherExp,
+      fuelExpenses: fuelExp || 0,
+      otherExpenses: otherExp || 0,
+      fuelReserve: calculatedFuelReserve,
+      maintenanceReserve: calculatedMaintReserve,
       platformEarnings,
       notes,
     };
     setSessions(prev => prev.map(s => (s.id === activeSession.id ? finished : s)));
-    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, endKm) }));
+    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, safeEndKm) }));
 
-    // Atualiza evento do planner do dia se houver
+    // Atualiza evento do planner do dia se houver:
+    // Apenas as despesas diretas desembolsadas entram em realizedExpenses; o combustível gasto entra em realizedReserves
     const todayStr = activeSession.startTime.split('T')[0];
     setPlannerEvents(prev =>
       prev.map(p =>
@@ -346,7 +430,8 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
           ? {
               ...p,
               realizedGross: gross + tips,
-              realizedExpenses: fuelExp + otherExp,
+              realizedExpenses: (fuelExp || 0) + (otherExp || 0),
+              realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
               realizedTrips: trips,
             }
           : p
@@ -364,13 +449,19 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     tripsCount?: number;
     fuelExpenses?: number;
     otherExpenses?: number;
+    fuelReserve?: number;
+    maintenanceReserve?: number;
     notes?: string;
     platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
   }) => {
     const kmDriven = Math.max(0, data.endOdometer - data.startOdometer);
-    const calculatedFuel = data.fuelExpenses !== undefined
-      ? data.fuelExpenses
-      : ((kmDriven / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89));
+    const calculatedFuelReserve = data.fuelReserve !== undefined
+      ? data.fuelReserve
+      : Math.round(((kmDriven / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89)) * 100) / 100;
+    const maintenanceRate = activeStrategy?.fuelAndMaintenancePlan.reserveMaintenancePerKm || 0.15;
+    const calculatedMaintReserve = data.maintenanceReserve !== undefined
+      ? data.maintenanceReserve
+      : Math.round((kmDriven * maintenanceRate) * 100) / 100;
 
     const newSession: WorkSession = {
       id: 'ses-' + Date.now(),
@@ -382,8 +473,10 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       grossEarnings: data.grossEarnings,
       tips: data.tips || 0,
       tripsCount: data.tripsCount || 1,
-      fuelExpenses: Math.round(calculatedFuel * 100) / 100,
+      fuelExpenses: data.fuelExpenses || 0,
       otherExpenses: data.otherExpenses || 0,
+      fuelReserve: calculatedFuelReserve,
+      maintenanceReserve: calculatedMaintReserve,
       platformEarnings: data.platformEarnings,
       notes: data.notes,
     };
@@ -399,6 +492,7 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
               ...p,
               realizedGross: (p.realizedGross || 0) + data.grossEarnings + (data.tips || 0),
               realizedExpenses: (p.realizedExpenses || 0) + (newSession.fuelExpenses + (data.otherExpenses || 0)),
+              realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
               realizedTrips: (p.realizedTrips || 0) + (data.tripsCount || 1),
             }
           : p
@@ -943,6 +1037,7 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setMaintenances([]);
     setPlannerEvents([]);
     setAlerts([]);
+    setCustomExpenseCategories([]);
     setIsDemoData(false);
     localStorage.clear();
   };
@@ -958,6 +1053,7 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       expenses,
       fuelRecords,
       maintenances,
+      customExpenseCategories,
       exportedAt: new Date().toISOString(),
       appVersion: '2.0.0',
     };
@@ -1007,6 +1103,9 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       if (data.expenses) setExpenses(data.expenses);
       if (data.fuelRecords) setFuelRecords(data.fuelRecords);
       if (data.maintenances) setMaintenances(data.maintenances);
+      if (Array.isArray(data.customExpenseCategories)) {
+        setCustomExpenseCategories(data.customExpenseCategories);
+      }
       setIsDemoData(false);
       return true;
     } catch {
@@ -1065,6 +1164,11 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         exportDataJSON,
         exportDataCSV,
         importDataJSON,
+        expenseCategories,
+        customExpenseCategories,
+        addCustomExpenseCategory,
+        removeCustomExpenseCategory,
+        resetCustomExpenseCategories,
       }}
     >
       {children}

@@ -28,6 +28,9 @@ import {
   RotateCcw,
   Check,
   Calendar,
+  PiggyBank,
+  CreditCard,
+  Receipt,
 } from 'lucide-react';
 
 interface ShiftModalProps {
@@ -64,14 +67,16 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
   const [grossOther, setGrossOther] = useState('');
   const [tips, setTips] = useState('');
   const [tripsCount, setTripsCount] = useState('10');
-  const [fuelExpense, setFuelExpense] = useState('');
+  const [fuelReserve, setFuelReserve] = useState('');
+  const [didRefuelAtPump, setDidRefuelAtPump] = useState(false);
+  const [pumpFuelPaid, setPumpFuelPaid] = useState('');
   const [otherExpense, setOtherExpense] = useState('');
   const [notes, setNotes] = useState('');
 
-  // Controle de Cálculo Automático
-  const [autoCalculateFuel, setAutoCalculateFuel] = useState(true);
+  // Controle de Cálculo Automático de Reservas
+  const [autoCalculateFuelReserve, setAutoCalculateFuelReserve] = useState(true);
   const [includeMaintenanceReserve, setIncludeMaintenanceReserve] = useState(true);
-  const [wasFuelManuallyEdited, setWasFuelManuallyEdited] = useState(false);
+  const [wasFuelReserveManuallyEdited, setWasFuelReserveManuallyEdited] = useState(false);
   const [showFormulaDetails, setShowFormulaDetails] = useState(false);
 
   // Cronômetro dinâmico
@@ -115,12 +120,12 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
     return calcShiftCostsFromKm(kmDriven, vehicle, gasPrice, maintenanceRate);
   }, [kmDriven, vehicle, gasPrice, maintenanceRate]);
 
-  // Sincroniza combustível automaticamente com o KM rodado quando o auto-calc estiver ligado
+  // Sincroniza a reserva de combustível automaticamente com o KM rodado quando o auto-calc estiver ligado
   useEffect(() => {
-    if (autoCalculateFuel && !wasFuelManuallyEdited) {
-      setFuelExpense(costBreakdown.fuelCost > 0 ? costBreakdown.fuelCost.toFixed(2) : '');
+    if (autoCalculateFuelReserve && !wasFuelReserveManuallyEdited) {
+      setFuelReserve(costBreakdown.fuelCost > 0 ? costBreakdown.fuelCost.toFixed(2) : '');
     }
-  }, [costBreakdown.fuelCost, autoCalculateFuel, wasFuelManuallyEdited]);
+  }, [costBreakdown.fuelCost, autoCalculateFuelReserve, wasFuelReserveManuallyEdited]);
 
   // Função para mudar Hodômetro Final e sincronizar KM direto
   const handleEndKmChange = (val: string) => {
@@ -128,9 +133,9 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
     const num = parseInt(val) || parsedStartKm;
     const diff = Math.max(0, num - parsedStartKm);
     setDirectKmInput(diff.toString());
-    if (autoCalculateFuel && !wasFuelManuallyEdited) {
+    if (autoCalculateFuelReserve && !wasFuelReserveManuallyEdited) {
       const costs = calcShiftCostsFromKm(diff, vehicle, gasPrice, maintenanceRate);
-      setFuelExpense(costs.fuelCost > 0 ? costs.fuelCost.toFixed(2) : '');
+      setFuelReserve(costs.fuelCost > 0 ? costs.fuelCost.toFixed(2) : '');
     }
   };
 
@@ -140,9 +145,9 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
     const diff = parseInt(val) || 0;
     const computedEnd = parsedStartKm + diff;
     setEndKm(computedEnd.toString());
-    if (autoCalculateFuel && !wasFuelManuallyEdited) {
+    if (autoCalculateFuelReserve && !wasFuelReserveManuallyEdited) {
       const costs = calcShiftCostsFromKm(diff, vehicle, gasPrice, maintenanceRate);
-      setFuelExpense(costs.fuelCost > 0 ? costs.fuelCost.toFixed(2) : '');
+      setFuelReserve(costs.fuelCost > 0 ? costs.fuelCost.toFixed(2) : '');
     }
   };
 
@@ -161,16 +166,16 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
     );
   };
 
-  // Restaura o cálculo automático
-  const handleRestoreAutoFuel = () => {
-    setWasFuelManuallyEdited(false);
-    setAutoCalculateFuel(true);
-    setFuelExpense(costBreakdown.fuelCost.toFixed(2));
+  // Restaura o cálculo automático da reserva para abastecimento futuro
+  const handleRestoreAutoFuelReserve = () => {
+    setWasFuelReserveManuallyEdited(false);
+    setAutoCalculateFuelReserve(true);
+    setFuelReserve(costBreakdown.fuelCost.toFixed(2));
   };
 
-  const handleFuelInputChange = (val: string) => {
-    setFuelExpense(val);
-    setWasFuelManuallyEdited(true);
+  const handleFuelReserveInputChange = (val: string) => {
+    setFuelReserve(val);
+    setWasFuelReserveManuallyEdited(true);
   };
 
   // Totais financeiros calculados em tempo real
@@ -183,12 +188,22 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
   const totalRevenue = totalGrossEarnings + parsedTips;
   const parsedTrips = parseInt(tripsCount) || 0;
 
-  const effectiveFuelExpense = parseFloat(fuelExpense) || (autoCalculateFuel ? costBreakdown.fuelCost : 0);
+  // 1. DESPESAS DIRETAS DESEMBOLSADAS NO TURNO
+  // O combustível consumido pelo motor NÃO entra como despesa direta (entra na reserva abaixo)
+  const parsedPumpFuel = didRefuelAtPump ? (parseFloat(pumpFuelPaid) || 0) : 0;
   const parsedOtherExp = parseFloat(otherExpense) || 0;
-  const effectiveMaintenanceExp = includeMaintenanceReserve ? costBreakdown.maintenanceCost : 0;
-  const totalExpenses = effectiveFuelExpense + parsedOtherExp + effectiveMaintenanceExp;
+  const totalDirectExpenses = parsedPumpFuel + parsedOtherExp;
 
-  const projectedNetProfit = totalRevenue - totalExpenses;
+  // 2. RESERVAS E PROVISÕES A GUARDAR (Abastecimento Futuro + Manutenção)
+  const effectiveFuelReserve = parseFloat(fuelReserve) || (autoCalculateFuelReserve ? costBreakdown.fuelCost : 0);
+  const effectiveMaintenanceReserve = includeMaintenanceReserve ? costBreakdown.maintenanceCost : 0;
+  const totalReserves = effectiveFuelReserve + effectiveMaintenanceReserve;
+
+  // 3. RESULTADOS: Saldo Imediato em Mãos e Lucro Líquido Real Limpo
+  // Dinheiro sobrando no bolso hoje (Bruto - Despesas Diretas Pagas):
+  const cashInHand = Math.max(0, totalRevenue - totalDirectExpenses);
+  // Lucro líquido real após separar o valor que deve ir para a reserva de abastecimento futuro e manutenção:
+  const projectedNetProfit = totalRevenue - totalDirectExpenses - totalReserves;
   const projectedMargin = totalRevenue > 0 ? (projectedNetProfit / totalRevenue) * 100 : 0;
   const projectedNetPerKm = safeDivide(projectedNetProfit, kmDriven);
 
@@ -220,10 +235,14 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
       totalGrossEarnings,
       parsedTips,
       parsedTrips,
-      effectiveFuelExpense,
-      parsedOtherExp + effectiveMaintenanceExp,
-      notes || `Turno com ${kmDriven} km rodados (Combustível autocalculado: ${formatCurrency(effectiveFuelExpense)})`,
-      platformBreakdown
+      parsedPumpFuel, // apenas o que foi pago no posto durante o turno (default 0)
+      parsedOtherExp, // despesas diretas desembolsadas (alimentação, pedágio)
+      notes || `Turno com ${kmDriven} km rodados • Reserva abastecimento futuro: ${formatCurrency(effectiveFuelReserve)}`,
+      platformBreakdown,
+      {
+        fuelReserve: effectiveFuelReserve,
+        maintenanceReserve: effectiveMaintenanceReserve,
+      }
     );
     onClose();
   };
@@ -249,9 +268,11 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
       grossEarnings: totalGrossEarnings,
       tips: parsedTips,
       tripsCount: parsedTrips,
-      fuelExpenses: effectiveFuelExpense,
-      otherExpenses: parsedOtherExp + effectiveMaintenanceExp,
-      notes: notes || `Rota concluída de ${kmDriven} km`,
+      fuelExpenses: parsedPumpFuel, // apenas o que foi pago no posto durante o turno
+      otherExpenses: parsedOtherExp, // despesas diretas desembolsadas
+      fuelReserve: effectiveFuelReserve, // valor a pôr na reserva para abastecimento futuro
+      maintenanceReserve: effectiveMaintenanceReserve,
+      notes: notes || `Rota concluída de ${kmDriven} km • Reserva abastecimento futuro: ${formatCurrency(effectiveFuelReserve)}`,
       platformEarnings: platformBreakdown,
     });
     onClose();
@@ -633,50 +654,20 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
                   </div>
                 )}
 
-                {/* CONTROLE DE APLICAÇÃO DO CUSTO AUTOMÁTICO */}
-                <div className="flex items-center justify-between pt-1.5 border-t border-white/10 text-xs flex-wrap gap-2">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={autoCalculateFuel}
-                      onChange={e => {
-                        setAutoCalculateFuel(e.target.checked);
-                        if (e.target.checked) {
-                          setWasFuelManuallyEdited(false);
-                          setFuelExpense(costBreakdown.fuelCost.toFixed(2));
-                        }
-                      }}
-                      className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <span className="text-slate-200 font-bold text-[11px]">
-                      Preencher combustível automaticamente pelo KM ({formatCurrency(costBreakdown.fuelCost)})
+                {/* CONTROLE DE APLICAÇÃO DA RESERVA DE COMBUSTÍVEL */}
+                <div className="flex items-center justify-between pt-2 border-t border-white/10 text-xs flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-md flex items-center gap-1">
+                      <PiggyBank className="w-3 h-3" />
+                      Reserva de Combustível Futuro: {formatCurrency(costBreakdown.fuelCost)}
                     </span>
-                  </label>
-
-                  {wasFuelManuallyEdited && (
-                    <button
-                      type="button"
-                      onClick={handleRestoreAutoFuel}
-                      className="text-[10px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 underline"
-                    >
-                      <RotateCcw className="w-3 h-3" />
-                      Restaurar automático
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={includeMaintenanceReserve}
-                      onChange={e => setIncludeMaintenanceReserve(e.target.checked)}
-                      className="w-4 h-4 rounded text-emerald-500 focus:ring-emerald-500"
-                    />
-                    <span className="text-slate-300 font-medium text-[11px]">
-                      Incluir Reserva de Manutenção no cálculo de despesas (+{formatCurrency(costBreakdown.maintenanceCost)})
+                    <span className="text-[10px] text-slate-400">
+                      ({costBreakdown.litersBurned}L estimados • R$ {gasPrice.toFixed(2)}/L)
                     </span>
-                  </label>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-medium">
+                    ✓ Destinado para reserva, não deduzido como despesa direta
+                  </span>
                 </div>
               </div>
             </div>
@@ -768,43 +759,27 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
               </div>
             </div>
 
-            {/* SEÇÃO 3: DESPESAS DIRETAS */}
+            {/* SEÇÃO 3: DESPESAS DIRETAS DESEMBOLSADAS NO TURNO */}
             <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                  <Fuel className="w-3.5 h-3.5 text-rose-400" />
-                  Despesas Efetivas do Turno
-                </span>
+                <div>
+                  <span className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Receipt className="w-3.5 h-3.5 text-rose-400" />
+                    Despesas Diretas Desembolsadas Hoje
+                  </span>
+                  <p className="text-[10px] text-slate-400">
+                    Apenas gastos pagos em dinheiro/cartão durante o turno (alimentação, pedágios, etc.)
+                  </p>
+                </div>
                 <span className="text-xs font-black text-rose-400 font-mono">
-                  {formatCurrency(totalExpenses)}
+                  {formatCurrency(totalDirectExpenses)}
                 </span>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-[11px] font-bold text-slate-400 uppercase">
-                      Combustível (R$)
-                    </label>
-                    {autoCalculateFuel && !wasFuelManuallyEdited && (
-                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5 rounded">
-                        Auto (KM)
-                      </span>
-                    )}
-                  </div>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={fuelExpense}
-                    onChange={e => handleFuelInputChange(e.target.value)}
-                    placeholder={costBreakdown.fuelCost.toFixed(2)}
-                    className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-xs text-amber-300 font-black focus:border-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">
-                    Outros Gastos (Alimentação/Pedágio)
+                  <label className="text-[11px] font-bold text-slate-300 uppercase block mb-1">
+                    Gastos Gerais (Alimentação, Café, Pedágio, Estacionamento)
                   </label>
                   <input
                     type="number"
@@ -812,8 +787,40 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
                     value={otherExpense}
                     onChange={e => setOtherExpense(e.target.value)}
                     placeholder="0.00"
-                    className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-xs text-white"
+                    className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:border-rose-500"
                   />
+                </div>
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-[11px] font-bold text-slate-300">
+                      <input
+                        type="checkbox"
+                        checked={didRefuelAtPump}
+                        onChange={e => {
+                          setDidRefuelAtPump(e.target.checked);
+                          if (!e.target.checked) setPumpFuelPaid('');
+                        }}
+                        className="w-4 h-4 rounded text-rose-500 focus:ring-rose-500"
+                      />
+                      <span>Abasteceu no posto durante este turno?</span>
+                    </label>
+                  </div>
+                  {didRefuelAtPump && (
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={pumpFuelPaid}
+                      onChange={e => setPumpFuelPaid(e.target.value)}
+                      placeholder="Valor pago no posto (R$)"
+                      className="w-full bg-black/40 border border-rose-500/50 rounded-xl px-3 py-2 text-xs text-rose-300 font-bold focus:border-rose-500"
+                    />
+                  )}
+                  {!didRefuelAtPump && (
+                    <p className="text-[10px] text-slate-400 italic">
+                      Se não passou no posto hoje, nenhuma despesa de combustível é deduzida diretamente do seu bolso agora.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -831,16 +838,114 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
               </div>
             </div>
 
-            {/* SEÇÃO 4: RESUMO AO VIVO DE LUCRO LÍQUIDO & INDICADORES DE PERFORMANCE */}
+            {/* SEÇÃO 4: RESERVAS ESTRATÉGICAS (ABASTECIMENTO FUTURO & MANUTENÇÃO) */}
+            <div className="bg-amber-950/20 border border-amber-500/30 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-black text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <PiggyBank className="w-4 h-4 text-amber-400" />
+                    Reservas Estratégicas a Guardar (Cofre da Rota)
+                  </span>
+                  <p className="text-[10px] text-amber-200/70">
+                    Valores que você deve pôr na reserva dos ganhos de hoje para cobrir custos futuros
+                  </p>
+                </div>
+                <span className="text-xs font-black text-amber-400 font-mono">
+                  {formatCurrency(totalReserves)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* CARD RESERVA DE ABASTECIMENTO FUTURO */}
+                <div className="bg-black/40 border border-amber-500/20 rounded-xl p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black text-amber-300 uppercase flex items-center gap-1">
+                      <Fuel className="w-3.5 h-3.5 text-amber-400" />
+                      Reserva para Abastecimento Futuro
+                    </span>
+                    {autoCalculateFuelReserve && !wasFuelReserveManuallyEdited && (
+                      <span className="text-[9px] bg-emerald-500/20 text-emerald-300 font-bold px-1.5 py-0.5 rounded">
+                        Auto ({kmDriven} km)
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-amber-400 font-bold">R$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={fuelReserve}
+                      onChange={e => handleFuelReserveInputChange(e.target.value)}
+                      placeholder={costBreakdown.fuelCost.toFixed(2)}
+                      className="w-full bg-slate-900 border border-amber-500/40 rounded-xl pl-8 pr-3 py-2 text-sm text-amber-300 font-black focus:border-amber-400"
+                    />
+                  </div>
+
+                  <p className="text-[10px] text-slate-400">
+                    Consumo estimado: <strong>{costBreakdown.litersBurned}L</strong> ({costBreakdown.avgConsumption} km/L • R$ {gasPrice.toFixed(2)}/L).
+                  </p>
+
+                  {wasFuelReserveManuallyEdited && (
+                    <button
+                      type="button"
+                      onClick={handleRestoreAutoFuelReserve}
+                      className="text-[10px] text-amber-400 hover:text-amber-300 font-bold flex items-center gap-1 underline"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Restaurar automático ({formatCurrency(costBreakdown.fuelCost)})
+                    </button>
+                  )}
+                </div>
+
+                {/* CARD RESERVA DE MANUTENÇÃO */}
+                <div className="bg-black/40 border border-sky-500/20 rounded-xl p-3 space-y-2 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[11px] font-black text-sky-300 uppercase flex items-center gap-1">
+                        <Wrench className="w-3.5 h-3.5 text-sky-400" />
+                        Reserva de Manutenção Preventiva
+                      </span>
+                      <span className="text-[11px] font-mono font-bold text-sky-300">
+                        {formatCurrency(costBreakdown.maintenanceCost)}
+                      </span>
+                    </div>
+
+                    <p className="text-[10px] text-slate-400">
+                      R$ {maintenanceRate.toFixed(2)}/km rodado para amortizar pneus, óleo, freios e revisões.
+                    </p>
+                  </div>
+
+                  <label className="flex items-center gap-2 cursor-pointer select-none pt-2 border-t border-white/10">
+                    <input
+                      type="checkbox"
+                      checked={includeMaintenanceReserve}
+                      onChange={e => setIncludeMaintenanceReserve(e.target.checked)}
+                      className="w-4 h-4 rounded text-sky-500 focus:ring-sky-500"
+                    />
+                    <span className="text-[11px] font-bold text-slate-200">
+                      Separar reserva de manutenção (+{formatCurrency(costBreakdown.maintenanceCost)})
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* SEÇÃO 5: RESUMO FINANCEIRO AO VIVO DE LUCRO LÍQUIDO & INDICADORES DE PERFORMANCE */}
             <div className="bg-slate-950 border border-white/15 rounded-2xl p-4 space-y-3 shadow-inner">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                  Lucro Líquido Real Calculado
-                </span>
+                <div>
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    Lucro Líquido Real (Pós-Reservas)
+                  </span>
+                  <span className="block text-[10px] text-emerald-400 font-medium">
+                    Lucro limpo após separar o combustível futuro e a manutenção
+                  </span>
+                </div>
                 <span className={`text-xs font-black px-2 py-0.5 rounded-lg ${
                   projectedNetProfit >= 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-rose-500/20 text-rose-300'
                 }`}>
-                  Margem {projectedMargin.toFixed(1)}%
+                  Margem Real {projectedMargin.toFixed(1)}%
                 </span>
               </div>
 
@@ -848,8 +953,13 @@ export const ShiftModal: React.FC<ShiftModalProps> = ({ isOpen, onClose }) => {
                 <div className="text-3xl font-black text-emerald-400 font-mono tracking-tight">
                   {formatCurrency(projectedNetProfit)}
                 </div>
-                <div className="text-right text-xs text-slate-400">
-                  Bruto: <strong className="text-white">{formatCurrency(totalRevenue)}</strong> • Custos: <strong className="text-rose-300">{formatCurrency(totalExpenses)}</strong>
+                <div className="text-right text-xs space-y-0.5">
+                  <div className="text-slate-400 text-[11px]">
+                    Saldo Imediato em Mãos: <strong className="text-sky-300 font-mono">{formatCurrency(cashInHand)}</strong>
+                  </div>
+                  <div className="text-slate-400 text-[10px]">
+                    Bruto: <strong className="text-white">{formatCurrency(totalRevenue)}</strong> • Despesas Diretas: <strong className="text-rose-300">{formatCurrency(totalDirectExpenses)}</strong> • Reservas: <strong className="text-amber-300">{formatCurrency(totalReserves)}</strong>
+                  </div>
                 </div>
               </div>
 

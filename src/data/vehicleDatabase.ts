@@ -788,22 +788,28 @@ export function findVehicleSpecs(make: string, model: string, year?: number): Ve
   const normMake = make.trim().toLowerCase();
   const normModel = model.trim().toLowerCase();
 
-  // 1. Busca exata por make e model
+  // 1. Busca por make e model considerando ano
   const match = POPULAR_VEHICLES_DATABASE.find(v => {
     const vMake = v.make.toLowerCase();
     const vModel = v.model.toLowerCase();
-    const matchesMake = vMake === normMake || normModel.includes(vMake);
-    const matchesModel = vModel.includes(normModel) || normModel.includes(vModel.split(' ')[0].toLowerCase());
+    const matchesMake = !normMake || vMake === normMake || normModel.includes(vMake);
+    const matchesModel =
+      vModel.includes(normModel) ||
+      normModel.includes(vModel) ||
+      normModel.includes(vModel.split(' ')[0].toLowerCase());
     const matchesYear = year ? v.years.includes(year) : true;
     return matchesMake && matchesModel && matchesYear;
   });
 
   if (match) return match;
 
-  // 2. Busca aproximada por palavras-chave no modelo
+  // 2. Busca aproximada por palavras-chave no modelo e ano
+  const searchTerms = `${normMake} ${normModel} ${year || ''}`
+    .split(/[\s-]+/)
+    .filter(t => t.length >= 2);
+
   return POPULAR_VEHICLES_DATABASE.find(v => {
-    const searchTerms = normModel.split(/[\s-]+/).filter(t => t.length > 2);
-    const vFull = `${v.make} ${v.model}`.toLowerCase();
+    const vFull = `${v.make} ${v.model} ${v.engine} ${v.years.join(' ')}`.toLowerCase();
     return searchTerms.some(term => vFull.includes(term));
   });
 }

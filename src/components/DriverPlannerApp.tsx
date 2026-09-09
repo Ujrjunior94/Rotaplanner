@@ -127,7 +127,11 @@ export const DriverPlannerApp: React.FC = () => {
           )}
 
           {activeTab === 'planner' && (
-            <PlannerView onOpenFuelAdvisor={() => setShowFuelAdvisorModal(true)} />
+            <PlannerView
+              onOpenFuelAdvisor={() => setShowFuelAdvisorModal(true)}
+              onOpenQuickModal={handleOpenQuickAdd}
+              onOpenShiftModal={() => setShowShiftModal(true)}
+            />
           )}
 
           {activeTab === 'analyzer' && <RideAnalyzerView />}

@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { useDriver } from '../context/DriverContext';
+import { useDriver, DEFAULT_EXPENSE_CATEGORIES } from '../context/DriverContext';
 import { ExpenseCategory, MaintenanceCategory, PlatformType } from '../types';
 import { safeDivide, formatCurrency, calcFuelParity } from '../utils/calc';
 import {
@@ -15,6 +15,10 @@ import {
   CheckCircle2,
   AlertCircle,
   HelpCircle,
+  Tag,
+  Plus,
+  Trash2,
+  Settings2,
 } from 'lucide-react';
 
 interface QuickAddModalProps {
@@ -43,6 +47,10 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
     addExpense,
     addFuelRecord,
     addMaintenance,
+    expenseCategories,
+    customExpenseCategories,
+    addCustomExpenseCategory,
+    removeCustomExpenseCategory,
   } = useDriver();
 
   const [activeTab, setActiveTab] = useState<'earning' | 'ride' | 'fuel' | 'expense' | 'maintenance'>(initialTab);
@@ -118,6 +126,53 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [expCategory, setExpCategory] = useState<ExpenseCategory>('Alimentação');
   const [expAmount, setExpAmount] = useState('');
   const [expDesc, setExpDesc] = useState('');
+  const [isCreatingCategory, setIsCreatingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [isManagingCategories, setIsManagingCategories] = useState(false);
+
+  // Manipulador para criar categoria personalizada
+  const handleCreateCategory = (nameToCreate?: string) => {
+    const target = (nameToCreate || newCategoryName).trim();
+    if (!target) return;
+    addCustomExpenseCategory(target);
+    setExpCategory(target as ExpenseCategory);
+    setNewCategoryName('');
+    setIsCreatingCategory(false);
+  };
+
+  // Ícones contextuais para categorias
+  const getCategoryIcon = (category: string) => {
+    const c = category.toLowerCase().trim();
+    if (c.includes('aliment') || c.includes('lanche') || c.includes('refei') || c.includes('comida') || c.includes('almoço')) return '🍽️';
+    if (c.includes('multa') || c.includes('infracao') || c.includes('radar')) return '🚨';
+    if (c.includes('limpeza') || c.includes('higien') || c.includes('aspirar')) return '✨';
+    if (c.includes('lavag') || c.includes('ducha') || c.includes('estética')) return '🚿';
+    if (c.includes('combust') || c.includes('gasolina') || c.includes('etanol') || c.includes('posto') || c.includes('abastec')) return '⛽';
+    if (c.includes('estacion') || c.includes('valet') || c.includes('zona azul') || c.includes('parqu')) return '🅿️';
+    if (c.includes('pedag') || c.includes('tag') || c.includes('sem parar') || c.includes('conectcar')) return '🛣️';
+    if (c.includes('internet') || c.includes('celular') || c.includes('telefone') || c.includes('plano')) return '📱';
+    if (c.includes('manuten') || c.includes('oficina') || c.includes('mecanic')) return '🔧';
+    if (c.includes('oleo') || c.includes('óleo') || c.includes('filtro')) return '🛢️';
+    if (c.includes('freio') || c.includes('pastilha')) return '🛑';
+    if (c.includes('pneu') || c.includes('calibr')) return '🛞';
+    if (c.includes('seguro')) return '🛡️';
+    if (c.includes('ipva') || c.includes('licenc')) return '📄';
+    if (c.includes('document') || c.includes('taxa')) return '📑';
+    if (c.includes('acess') || c.includes('suporte') || c.includes('cabo')) return '🔌';
+    if (c.includes('agua') || c.includes('água') || c.includes('bala') || c.includes('mimo')) return '🍬';
+    return '🏷️';
+  };
+
+  // Chips para seleção rápida (personalizadas + principais categorias recomendadas)
+  const displayCategoryChips = useMemo(() => {
+    const priority = ['Alimentação', 'Multas', 'Limpeza', 'Lavagem', 'Combustível', 'Estacionamento', 'Pedágio', 'Internet', 'Manutenção'];
+    const combined = [...customExpenseCategories, ...priority];
+    const unique = Array.from(new Set(combined.map(c => c.trim()))).filter(Boolean);
+    if (!unique.includes(expCategory)) {
+      unique.unshift(expCategory);
+    }
+    return unique;
+  }, [customExpenseCategories, expCategory]);
 
   // 5. MANUTENÇÃO
   const [maintCategory, setMaintCategory] = useState<MaintenanceCategory>('Troca de Óleo');
@@ -739,22 +794,203 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         {activeTab === 'expense' && (
           <form onSubmit={handleExpenseSubmit} className="space-y-3.5">
             <div>
-              <label className="text-[11px] font-bold text-slate-400 uppercase block mb-1">Categoria</label>
-              <select
-                value={expCategory}
-                onChange={e => setExpCategory(e.target.value as ExpenseCategory)}
-                className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2.5 text-xs text-white"
-              >
-                <option value="Alimentação">Alimentação / Lanche</option>
-                <option value="Lavagem">Lavagem & Estética</option>
-                <option value="Estacionamento">Estacionamento</option>
-                <option value="Pedágio">Pedágio</option>
-                <option value="Internet">Internet / Plano Celular</option>
-                <option value="Seguro">Seguro</option>
-                <option value="IPVA">IPVA</option>
-                <option value="Documentação">Documentação & Taxas</option>
-                <option value="Outros">Outros Gastos</option>
-              </select>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-rose-400" />
+                  Categoria da Despesa
+                </label>
+                <div className="flex items-center gap-1.5">
+                  {customExpenseCategories.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsManagingCategories(!isManagingCategories)}
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition border flex items-center gap-1 ${
+                        isManagingCategories
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          : 'bg-white/5 text-slate-400 border-white/10 hover:text-white'
+                      }`}
+                      title="Gerenciar categorias personalizadas"
+                    >
+                      <Settings2 className="w-3 h-3" />
+                      {isManagingCategories ? 'Fechar' : `Gerenciar (${customExpenseCategories.length})`}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCreatingCategory(!isCreatingCategory);
+                      setIsManagingCategories(false);
+                    }}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-lg transition border flex items-center gap-1 ${
+                      isCreatingCategory
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                        : 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                    }`}
+                  >
+                    <Plus className="w-3 h-3" />
+                    Nova Categoria
+                  </button>
+                </div>
+              </div>
+
+              {/* Criador Rápido de Nova Categoria */}
+              {isCreatingCategory && (
+                <div className="mb-2.5 p-2.5 bg-rose-950/30 border border-rose-500/30 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-rose-300 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+                      Criar Categoria Personalizada
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCreatingCategory(false)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={e => setNewCategoryName(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleCreateCategory();
+                        }
+                      }}
+                      placeholder="Ex: Multas, Limpeza, Água e Balas..."
+                      className="flex-1 bg-slate-900 border border-white/20 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder:text-slate-500 focus:outline-none focus:border-rose-500"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      disabled={!newCategoryName.trim()}
+                      onClick={() => handleCreateCategory()}
+                      className="bg-rose-500 hover:bg-rose-400 disabled:opacity-50 text-slate-950 font-black px-3 py-1.5 rounded-lg text-xs flex items-center gap-1 active:scale-95 transition"
+                    >
+                      <Check className="w-3 h-3 stroke-[3]" />
+                      Adicionar
+                    </button>
+                  </div>
+
+                  {/* Sugestões rápidas de 1 toque */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    <span className="text-[10px] text-slate-400">Sugestões:</span>
+                    {['Multas', 'Limpeza', 'Alimentação', 'Acessórios', 'Água & Balas', 'Pedágio Sem Parar']
+                      .filter(sug => !expenseCategories.includes(sug))
+                      .map(sug => (
+                        <button
+                          key={sug}
+                          type="button"
+                          onClick={() => handleCreateCategory(sug)}
+                          className="text-[10px] bg-white/5 hover:bg-white/10 text-slate-300 px-2 py-0.5 rounded-md border border-white/10 transition flex items-center gap-1"
+                        >
+                          <Plus className="w-2.5 h-2.5" />
+                          {sug}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Gerenciamento de Categorias Personalizadas */}
+              {isManagingCategories && customExpenseCategories.length > 0 && (
+                <div className="mb-2.5 p-2.5 bg-slate-900 border border-white/15 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1.5">
+                      <Settings2 className="w-3.5 h-3.5 text-slate-400" />
+                      Minhas Categorias Personalizadas ({customExpenseCategories.length})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsManagingCategories(false)}
+                      className="text-slate-400 hover:text-white"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                    {customExpenseCategories.map(cat => (
+                      <div
+                        key={cat}
+                        className="inline-flex items-center gap-1 bg-white/5 border border-white/10 rounded-lg px-2 py-1 text-xs text-white"
+                      >
+                        <span>{getCategoryIcon(cat)} {cat}</span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            removeCustomExpenseCategory(cat);
+                            if (expCategory === cat) {
+                              setExpCategory('Alimentação');
+                            }
+                          }}
+                          className="text-slate-400 hover:text-rose-400 ml-1 transition"
+                          title={`Remover categoria ${cat}`}
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Chips rápidos de 1 toque (personalizadas + comuns) */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 pt-0.5 no-scrollbar">
+                {displayCategoryChips.map(cat => {
+                  const isSelected = expCategory === cat;
+                  const isCustom = customExpenseCategories.includes(cat);
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setExpCategory(cat as ExpenseCategory)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-semibold whitespace-nowrap transition flex items-center gap-1.5 border ${
+                        isSelected
+                          ? 'bg-rose-500 text-slate-950 border-rose-400 font-bold shadow-md shadow-rose-500/20'
+                          : isCustom
+                          ? 'bg-rose-950/40 text-rose-300 border-rose-500/30 hover:bg-rose-900/40'
+                          : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                      }`}
+                    >
+                      <span>{getCategoryIcon(cat)}</span>
+                      <span>{cat}</span>
+                      {isCustom && !isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-400 inline-block" title="Personalizada" />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Dropdown com todas as categorias organizadas */}
+              <div className="mt-1.5">
+                <select
+                  value={expCategory}
+                  onChange={e => setExpCategory(e.target.value as ExpenseCategory)}
+                  className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2.5 text-xs text-white focus:outline-none focus:border-rose-500 font-medium"
+                >
+                  {customExpenseCategories.length > 0 && (
+                    <optgroup label="✨ Minhas Categorias Personalizadas">
+                      {customExpenseCategories.map(cat => (
+                        <option key={`custom-${cat}`} value={cat}>
+                          ⭐ {cat} (Personalizada)
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="📁 Categorias Padrão">
+                    {DEFAULT_EXPENSE_CATEGORIES.map(cat => (
+                      <option key={`def-${cat}`} value={cat}>
+                        {getCategoryIcon(cat)} {cat}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </div>
             </div>
 
             <div>

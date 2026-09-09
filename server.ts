@@ -31,8 +31,11 @@ function getAIClient(): GoogleGenAI {
   return aiClient;
 }
 
-// Health check endpoint
+// Health check endpoints
 app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', serverTime: new Date().toISOString() });
+});
+app.get('/health', (req, res) => {
   res.json({ status: 'ok', serverTime: new Date().toISOString() });
 });
 
@@ -268,8 +271,12 @@ app.post('/api/gemini/parse-voice-intent', handleParseIntentRequest);
 // Vite middleware in dev or static server in production
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    const isHmrDisabled = process.env.DISABLE_HMR === 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: isHmrDisabled ? false : undefined,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -286,4 +293,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch((err) => {
+  console.error('Failed to start server:', err);
+  process.exit(1);
+});

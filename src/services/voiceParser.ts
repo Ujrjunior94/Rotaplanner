@@ -229,7 +229,13 @@ export function extractExpenseCategory(text: string): ExpenseCategory {
   if (norm.includes('pedagio') || norm.includes('sem parar') || norm.includes('tag')) {
     return 'Pedágio';
   }
-  if (norm.includes('lava') || norm.includes('lavagem') || norm.includes('lavacar') || norm.includes('ducha') || norm.includes('limpeza')) {
+  if (norm.includes('multa') || norm.includes('infracao') || norm.includes('radar')) {
+    return 'Multas';
+  }
+  if (norm.includes('limpeza') || norm.includes('higien') || norm.includes('aspirar')) {
+    return 'Limpeza';
+  }
+  if (norm.includes('lava') || norm.includes('lavagem') || norm.includes('lavacar') || norm.includes('ducha')) {
     return 'Lavagem';
   }
   if (norm.includes('estacionamento') || norm.includes('parquimetro') || norm.includes('zona azul') || norm.includes('valet')) {
@@ -474,8 +480,8 @@ export function parseVoiceCommand(
       confidence: 0.95,
       rawText,
       requiresConfirmation: true,
-      speechResponse: `Finalizando rota com ${extractedKm} km rodados. Custo de combustível autocalculado em ${formatCurrency(costs.fuelCost)} e manutenção em ${formatCurrency(costs.maintenanceCost)}. Confirmar encerramento?`,
-      confirmationMessage: `Encerrar turno com ${extractedKm} km rodados (${formatCurrency(costs.fuelCost)} de combustível e ${formatCurrency(costs.maintenanceCost)} de manutenção)?`,
+      speechResponse: `Finalizando rota com ${extractedKm} km rodados. Reserva para abastecimento futuro calculada em ${formatCurrency(costs.fuelCost)} e manutenção em ${formatCurrency(costs.maintenanceCost)}. Confirmar encerramento?`,
+      confirmationMessage: `Encerrar turno com ${extractedKm} km rodados (Reserva para abastecimento futuro: ${formatCurrency(costs.fuelCost)}, Reserva de manutenção: ${formatCurrency(costs.maintenanceCost)})?`,
       data: {
         endSession: {
           endKm,

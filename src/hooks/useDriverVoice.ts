@@ -53,6 +53,7 @@ export function useDriverVoice() {
     fuelRecords,
     goals,
     plannerEvents,
+    activeStrategy,
     startShift,
     endShift,
     addEarning,
@@ -179,14 +180,18 @@ export function useDriverVoice() {
         const finalKm = data.endSession.endKm || vehicle.currentOdometer + 60;
         const kmDriven = Math.max(0, finalKm - activeSession.startOdometer);
         const autoFuel = (kmDriven / (vehicle.avgConsumption || 11.5)) * (profile.gasPriceReference || 5.89);
+        const maintenanceRate = activeStrategy?.fuelAndMaintenancePlan.reserveMaintenancePerKm || 0.15;
+        const maintCost = kmDriven * maintenanceRate;
         endShift(
           finalKm,
           data.endSession.totalGross || 0,
           0,
           1,
-          Math.round(autoFuel * 100) / 100,
+          0, // Combustível gasto vai para a reserva para abastecimento futuro, e não para a despesa direta
           0,
-          `Encerrado via Driver Voice (${kmDriven} km rodados • Combustível autocalculado: R$ ${autoFuel.toFixed(2)})`
+          `Encerrado via Driver Voice (${kmDriven} km rodados • Reserva abastecimento futuro: R$ ${autoFuel.toFixed(2)})`,
+          undefined,
+          { fuelReserve: Math.round(autoFuel * 100) / 100, maintenanceReserve: Math.round(maintCost * 100) / 100 }
         );
       } else if (intent === 'CREATE_PLANNER_EVENT' && data?.plannerEvent) {
         addPlannerEvent({

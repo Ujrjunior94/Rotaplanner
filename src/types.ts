@@ -16,7 +16,10 @@ export type ExpenseCategory =
   | 'Pedágio'
   | 'Internet'
   | 'Lavagem'
-  | 'Outros';
+  | 'Limpeza'
+  | 'Multas'
+  | 'Outros'
+  | (string & {});
 
 export type MaintenanceCategory =
   | 'Troca de Óleo'
@@ -78,8 +81,10 @@ export interface WorkSession {
   grossEarnings: number;
   tips: number;
   tripsCount: number;
-  fuelExpenses: number;
-  otherExpenses: number;
+  fuelExpenses: number; // Despesa com abastecimento imediato no turno (se abasteceu no posto)
+  otherExpenses: number; // Despesas diretas imediatas (alimentação, pedágio, etc.)
+  fuelReserve?: number; // Valor a por na reserva para abastecimento futuro
+  maintenanceReserve?: number; // Valor a por na reserva para manutenção preventiva
   platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
   notes?: string;
 }
@@ -96,6 +101,7 @@ export interface PlannerEvent {
   // Dados realizados sincronizados
   realizedGross?: number;
   realizedExpenses?: number;
+  realizedReserves?: number;
   realizedTrips?: number;
 }
 

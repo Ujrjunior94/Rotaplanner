@@ -261,7 +261,17 @@ export const DriverVoiceModal: React.FC<DriverVoiceModalProps> = ({
         const costs = calcShiftCostsFromKm(kmDriven, vehicle, gasPrice, maintenanceRate);
         const autoFuel = costs.fuelCost;
         const totalGross = entities.amount || 0;
-        endShift(endKm, totalGross, 0, 0, 0, autoFuel, `Encerrado via Driver Voice (${kmDriven} km rodados - Combustível R$ ${autoFuel.toFixed(2)})`);
+        endShift(
+          endKm,
+          totalGross,
+          0,
+          0,
+          0, // Despesa de combustível direta = 0
+          0, // Outras despesas = 0
+          `Encerrado via Driver Voice (${kmDriven} km rodados • Reserva abastecimento futuro: R$ ${autoFuel.toFixed(2)})`,
+          undefined,
+          { fuelReserve: autoFuel, maintenanceReserve: costs.maintenanceCost }
+        );
         contextRef.current.lastIntent = 'END_WORK_SESSION';
       }
 

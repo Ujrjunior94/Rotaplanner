@@ -49,14 +49,11 @@ export const VehicleSpecsModal: React.FC<VehicleSpecsModalProps> = ({
   // Filtrar veículos pela busca ou montadora selecionada
   const filteredVehicles = useMemo(() => {
     if (searchQuery.trim().length > 1) {
-      const q = searchQuery.toLowerCase();
-      return POPULAR_VEHICLES_DATABASE.filter(
-        v =>
-          v.make.toLowerCase().includes(q) ||
-          v.model.toLowerCase().includes(q) ||
-          v.engine.toLowerCase().includes(q) ||
-          v.years.some(y => y.toString().includes(q))
-      );
+      const terms = searchQuery.toLowerCase().trim().split(/\s+/);
+      return POPULAR_VEHICLES_DATABASE.filter(v => {
+        const text = `${v.make} ${v.model} ${v.engine} ${v.years.join(' ')} ${v.description || ''}`.toLowerCase();
+        return terms.every(term => text.includes(term));
+      });
     }
     return getModelsByMake(selectedMake);
   }, [searchQuery, selectedMake]);

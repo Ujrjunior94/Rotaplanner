@@ -37,6 +37,8 @@ export interface VoiceEntities extends Record<string, any> {
     | 'Alimentação'
     | 'Combustível'
     | 'Lavagem'
+    | 'Limpeza'
+    | 'Multas'
     | 'Pedágio'
     | 'Manutenção'
     | 'Pneus'
@@ -408,12 +410,14 @@ function fallbackParseVoiceIntent(
   }
 
   // Despesa
-  if (/(gastei|despesa|almo[çc]o|lanche|comida|lavagem|ped[aá]gio|pneu|manuten[çc][aã]o|troca de [oó]leo|estacionamento)/i.test(lower)) {
+  if (/(gastei|despesa|almo[çc]o|lanche|comida|lavagem|limpeza|multa|ped[aá]gio|pneu|manuten[çc][aã]o|troca de [oó]leo|estacionamento)/i.test(lower)) {
     if (amount) entities.amount = amount;
     else missingParams.push('amount');
 
     let category = 'Outros';
     if (/almo[çc]o|lanche|comida|refei[çc][aã]o|caf[eé]/i.test(lower)) category = 'Alimentação';
+    else if (/multa|infracao|radar/i.test(lower)) category = 'Multas';
+    else if (/limpeza|higien/i.test(lower)) category = 'Limpeza';
     else if (/lavagem|lava[ -]?jato|lavar/i.test(lower)) category = 'Lavagem';
     else if (/ped[aá]gio/i.test(lower)) category = 'Pedágio';
     else if (/estacionamento|pare/i.test(lower)) category = 'Estacionamento';
