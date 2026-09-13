@@ -11,6 +11,8 @@ import {
   ExpenseItem,
 } from '../types';
 import { formatCurrency, safeDivide } from '../utils/calc';
+import { calculateDayFinancialTruth } from '../utils/financialTruth';
+import { DEFAULT_TIMEZONE } from '../utils/timezone';
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -74,6 +76,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
   onOpenShiftModal,
 }) => {
   const {
+    profile,
     plannerEvents,
     recurringSchedule,
     addPlannerEvent,
@@ -95,6 +98,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
     expenseCategories,
     customExpenseCategories,
     syncAllLaunchesToPlanner,
+    reconcilePlannerData,
   } = useDriver();
 
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month' | 'transactions' | 'recurring'>('week');
@@ -302,22 +306,22 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
       }
     });
 
-    // Totais financeiros normalizados e harmonizados com Dashboard
-    const grossFromSessions = daySessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
-    const grossFromItems = dayEarnings.reduce((acc, e) => acc + e.amount + (e.tip || 0), 0);
-    const totalGross = Math.max(grossFromSessions, grossFromItems);
+    // Totais financeiros normalizados e consolidados via Fonte Única da Verdade (FASE D)
+    const truth = calculateDayFinancialTruth(
+      dateStr,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      profile.timezone || DEFAULT_TIMEZONE
+    );
 
-    const expFromSessions = daySessions.reduce((acc, s) => acc + s.fuelExpenses + s.otherExpenses, 0);
-    const expFromItems = dayExpenses.reduce((acc, e) => acc + e.amount, 0);
-    const totalExpenses = Math.max(expFromSessions, expFromItems);
-
-    const dayFuelReserve = daySessions.reduce((acc, s) => acc + (s.fuelReserve || 0), 0);
-    const dayMaintReserve = daySessions.reduce((acc, s) => acc + (s.maintenanceReserve || 0), 0);
-    const totalReserves = dayFuelReserve + dayMaintReserve;
-    const netProfit = totalGross - totalExpenses - totalReserves;
-
-    const tripsCount = daySessions.reduce((acc, s) => acc + s.tripsCount, 0) ||
-      dayEarnings.reduce((acc, e) => acc + (e.tripsCount || 1), 0);
+    const totalGross = truth.grossEarnings;
+    const totalExpenses = truth.totalExpenses;
+    const totalReserves = truth.reserves;
+    const netProfit = truth.availableCash; // DISPONÍVEL = Faturamento - Custos - Reservas
+    const tripsCount = truth.tripsCount;
 
     return {
       dateStr,
@@ -326,6 +330,7 @@ export const PlannerView: React.FC<PlannerViewProps> = ({
       totalReserves,
       netProfit,
       tripsCount,
+      truth,
       earningsCount: earningsItems.length,
       expensesCount: expensesItems.length,
       earningsItems,

@@ -12,6 +12,9 @@ import {
   Fuel,
   Mic,
   BarChart3,
+  ChevronRight,
+  Shield,
+  FileText,
 } from 'lucide-react';
 
 interface MoreMenuModalProps {
@@ -35,151 +38,170 @@ export const MoreMenuModal: React.FC<MoreMenuModalProps> = ({
 }) => {
   if (!isOpen) return null;
 
-  const items = [
+  const sections = [
     {
-      id: 'driverVoice',
-      label: 'Driver Voice (Comandos de Voz)',
-      desc: 'Controle o app por voz: registre ganhos, abastecimentos e consulte dados',
-      icon: Mic,
-      color: 'text-emerald-400',
-      bg: 'bg-emerald-500/10',
-      isAction: true,
-      action: () => {
-        if (onOpenVoiceModal) onOpenVoiceModal();
-      },
+      title: 'ANÁLISE & DESEMPENHO',
+      items: [
+        {
+          id: 'reports' as MainTabType,
+          label: 'Relatórios & DRE em PDF',
+          desc: 'Demonstrativos em PDF (A4), fechamentos e gráficos',
+          icon: BarChart3,
+          color: 'text-emerald-400',
+          bg: 'bg-emerald-500/10',
+        },
+        {
+          id: 'goals' as MainTabType,
+          label: 'Metas & Progresso',
+          desc: 'Meta semanal/mensal e ritmo diário restante',
+          icon: Target,
+          color: 'text-emerald-400',
+          bg: 'bg-emerald-500/10',
+        },
+        {
+          id: 'analyzer' as MainTabType,
+          label: 'Calculadora "Vale a Pena?"',
+          desc: 'Score 0-100 em 3 segundos para aceitar corridas',
+          icon: Calculator,
+          color: 'text-teal-400',
+          bg: 'bg-teal-500/10',
+        },
+      ],
     },
     {
-      id: 'driverMode',
-      label: 'Modo Motorista (Cockpit)',
-      desc: 'Interface simplificada para o trânsito com comandos de voz integrados',
-      icon: Car,
-      color: 'text-amber-400',
-      bg: 'bg-amber-500/10',
-      isAction: true,
-      action: () => {
-        if (onOpenDriverMode) onOpenDriverMode();
-      },
+      title: 'VEÍCULO & GESTÃO',
+      items: [
+        {
+          id: 'vehicle' as MainTabType,
+          label: 'Custo Real do Carro',
+          desc: 'Custo por KM, depreciação e manutenção preventiva',
+          icon: Car,
+          color: 'text-sky-400',
+          bg: 'bg-sky-500/10',
+        },
+        {
+          id: 'insights' as MainTabType,
+          label: 'Driver Insights',
+          desc: 'Melhores dias, horários e estratégias operacionais',
+          icon: Lightbulb,
+          color: 'text-amber-400',
+          bg: 'bg-amber-500/10',
+        },
+      ],
     },
     {
-      id: 'fuelAdvisor',
-      label: 'Devo Abastecer Hoje?',
-      desc: 'Consultor de autonomia diária e calculadora Etanol vs Gasolina',
-      icon: Fuel,
-      color: 'text-amber-400',
-      bg: 'bg-amber-500/10',
-      isAction: true,
-      action: () => {
-        if (onOpenFuelAdvisor) onOpenFuelAdvisor();
-      },
-    },
-    {
-      id: 'fuel' as MainTabType,
-      label: 'Tanque & Abastecimento (Painel Sandero)',
-      desc: 'Nível em 8 barras LCD estilo Renault Sandero, autonomia e abastecimentos',
-      icon: Fuel,
-      color: 'text-amber-400',
-      bg: 'bg-amber-500/10',
-    },
-    {
-      id: 'reports' as MainTabType,
-      label: 'Relatórios em PDF & Gráficos',
-      desc: 'Emita demonstrativos semanais e mensais em PDF (A4)',
-      icon: BarChart3,
-      color: 'text-emerald-400',
-      bg: 'bg-emerald-500/10',
-    },
-    {
-      id: 'goals' as MainTabType,
-      label: 'Metas & Progresso',
-      desc: 'Meta diária, semanal e cálculo de R$/dia restante',
-      icon: Target,
-      color: 'text-emerald-400',
-      bg: 'bg-emerald-500/10',
-    },
-    {
-      id: 'analyzer' as MainTabType,
-      label: 'Vale a Pena?',
-      desc: 'Calculadora rápida de rentabilidade por corrida',
-      icon: Calculator,
-      color: 'text-teal-400',
-      bg: 'bg-teal-500/10',
-    },
-    {
-      id: 'vehicle' as MainTabType,
-      label: 'Custo Real do Carro',
-      desc: 'Depreciação, combustível, manutenções e revisões',
-      icon: Car,
-      color: 'text-sky-400',
-      bg: 'bg-sky-500/10',
-    },
-    {
-      id: 'insights' as MainTabType,
-      label: 'Driver Insights',
-      desc: 'Análise de inteligência com dados reais da sua operação',
-      icon: Lightbulb,
-      color: 'text-amber-400',
-      bg: 'bg-amber-500/10',
-    },
-    {
-      id: 'settings' as MainTabType,
-      label: 'Configurações & Backups',
-      desc: 'Perfil, exportação CSV/JSON e parâmetros de corte',
-      icon: Settings,
-      color: 'text-slate-300',
-      bg: 'bg-white/10',
+      title: 'FERRAMENTAS & SISTEMA',
+      items: [
+        {
+          id: 'driverMode',
+          label: 'Modo Motorista (Cockpit)',
+          desc: 'Interface segura e ampliada para uso no suporte',
+          icon: Car,
+          color: 'text-amber-400',
+          bg: 'bg-amber-500/10',
+          isAction: true,
+          action: () => {
+            if (onOpenDriverMode) onOpenDriverMode();
+          },
+        },
+        {
+          id: 'driverVoice',
+          label: 'Driver Voice 🎙️',
+          desc: 'Comandos de voz naturais para registrar dados',
+          icon: Mic,
+          color: 'text-emerald-400',
+          bg: 'bg-emerald-500/10',
+          isAction: true,
+          action: () => {
+            if (onOpenVoiceModal) onOpenVoiceModal();
+          },
+        },
+        {
+          id: 'settings' as MainTabType,
+          label: 'Configurações & Backups',
+          desc: 'Perfil, exportações CSV/JSON e integridade',
+          icon: Settings,
+          color: 'text-slate-300',
+          bg: 'bg-slate-800',
+        },
+      ],
     },
   ];
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center p-0 bg-slate-950/80 backdrop-blur-md md:hidden">
-      <div className="bg-slate-900 border-t border-white/15 rounded-t-3xl w-full p-5 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-400 flex items-center justify-center font-bold text-slate-950">
+      <div className="bg-slate-900 border-t border-slate-800 rounded-t-3xl w-full p-4 sm:p-5 shadow-2xl space-y-4 max-h-[85vh] overflow-y-auto">
+        {/* CABEÇALHO DO MENU */}
+        <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-emerald-500 flex items-center justify-center font-black text-slate-950 text-sm">
               DP
             </div>
             <div>
-              <h3 className="text-base font-black text-white">MAIS FERRAMENTAS</h3>
-              <p className="text-[11px] text-slate-400">Atalhos rápidos para o seu cockpit</p>
+              <h3 className="text-sm font-black text-white uppercase tracking-wider">Mais Ferramentas</h3>
+              <p className="text-[11px] text-slate-400">Recursos de gestão e análise</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:text-white">
-            <X className="w-5 h-5" />
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center transition"
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
 
-        <div className="space-y-2">
-          {items.map(item => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  if (item.isAction && item.action) {
-                    item.action();
-                  } else {
-                    onSelectTab(item.id as MainTabType);
-                    onClose();
-                  }
-                }}
-                className="w-full flex items-center gap-3.5 p-3.5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 transition text-left"
-              >
-                <div className={`w-10 h-10 rounded-xl ${item.bg} ${item.color} flex items-center justify-center shrink-0`}>
-                  <Icon className="w-5 h-5" />
-                </div>
-                <div>
-                  <div className="text-xs font-black text-white">{item.label}</div>
-                  <div className="text-[11px] text-slate-400 mt-0.5">{item.desc}</div>
-                </div>
-              </button>
-            );
-          })}
+        {/* SEÇÕES AGRUPADAS (REDUÇÃO DE CARGA COGNITIVA) */}
+        <div className="space-y-4">
+          {sections.map((section, idx) => (
+            <div key={idx} className="space-y-1.5">
+              <div className="text-[10px] font-black text-slate-500 uppercase tracking-widest px-1">
+                {section.title}
+              </div>
+              <div className="space-y-1.5">
+                {section.items.map(item => {
+                  const Icon = item.icon;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        if (item.isAction && item.action) {
+                          item.action();
+                        } else {
+                          onSelectTab(item.id as MainTabType);
+                          onClose();
+                        }
+                      }}
+                      className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-800/60 hover:bg-slate-800 border border-slate-700/50 transition text-left active:scale-[0.99] group"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-xl ${item.bg} ${item.color} flex items-center justify-center shrink-0`}>
+                          <Icon className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-xs font-bold text-white group-hover:text-emerald-300 transition truncate">
+                            {item.label}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {item.desc}
+                          </div>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-slate-300 transition shrink-0 ml-2" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
+        {/* BOTÃO DE FECHAR */}
         <div className="pt-2">
           <button
+            type="button"
             onClick={onClose}
-            className="w-full bg-white/10 text-slate-300 font-bold py-3 rounded-2xl text-xs"
+            className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold py-3 rounded-2xl text-xs transition"
           >
             Fechar Menu
           </button>

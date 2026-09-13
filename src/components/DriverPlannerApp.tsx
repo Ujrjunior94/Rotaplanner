@@ -93,11 +93,7 @@ export const DriverPlannerApp: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen text-slate-100 font-sans antialiased pb-24 md:pb-8 selection:bg-emerald-500 selection:text-slate-950 relative"
-      style={{
-        background: 'radial-gradient(circle at 10% 20%, #064e3b 0%, #020617 40%), radial-gradient(circle at 90% 80%, #1e1b4b 0%, #020617 50%)',
-        minHeight: '100vh',
-      }}
+      className="min-h-screen text-slate-100 font-sans antialiased pb-24 md:pb-8 selection:bg-emerald-500 selection:text-slate-950 relative bg-[#090D14]"
     >
       {/* NAVBAR FIXA NO TOPO */}
       <Navbar

@@ -17,6 +17,8 @@ import {
   safeDivide,
   calcDepreciationPerKm,
 } from './calc';
+import { calculateRangeFinancialTruth } from './financialTruth';
+import { DEFAULT_TIMEZONE } from './timezone';
 
 export interface PDFExportOptions {
   includeVehicleDetails?: boolean;
@@ -185,48 +187,39 @@ export const aggregateWeeklyData = (
     return fTime >= startTimeMs && fTime <= endTimeMs;
   });
 
-  // Totais das sessões
-  const sessionGross = periodSessions.reduce((sum, s) => sum + s.grossEarnings, 0);
-  const sessionTips = periodSessions.reduce((sum, s) => sum + s.tips, 0);
-  const sessionFuelExp = periodSessions.reduce((sum, s) => sum + s.fuelExpenses, 0);
-  const sessionOtherExp = periodSessions.reduce((sum, s) => sum + s.otherExpenses, 0);
-  const sessionTrips = periodSessions.reduce((sum, s) => sum + s.tripsCount, 0);
+  // Totais consolidados via Fonte Única da Verdade (FASE D)
+  const dateStrings: string[] = [];
+  const curDate = new Date(range.startDate);
+  while (curDate <= range.endDate) {
+    dateStrings.push(curDate.toISOString().split('T')[0]);
+    curDate.setDate(curDate.getDate() + 1);
+  }
 
-  // Considerar despesas registradas avulsas + despesas de sessões
-  const directExpensesFromList = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const directFuelFromList = periodFuel.reduce((sum, f) => sum + f.totalAmount, 0);
+  const rangeTruth = calculateRangeFinancialTruth(
+    dateStrings,
+    sessions,
+    expenses,
+    fuelRecords,
+    earnings,
+    profile.fuelCalculationMethod || 'hibrido',
+    profile.timezone || DEFAULT_TIMEZONE
+  );
 
-  // Evitar duplicar combustível se já estiver na lista de despesas ou no turno
-  const totalFuelCost = Math.max(sessionFuelExp, directFuelFromList);
-  const totalOtherExpenses = Math.max(sessionOtherExp, directExpensesFromList);
-  const totalExpenses = totalFuelCost + totalOtherExpenses;
+  const totalFuelCost = rangeTruth.fuelTotal;
+  const totalOtherExpenses = rangeTruth.otherExpensesTotal;
+  const totalExpenses = rangeTruth.expensesTotal;
 
-  // Ganhos totais
-  const grossEarningsFromItems = periodEarnings.reduce((sum, e) => sum + e.amount, 0);
-  const tipsFromItems = periodEarnings.reduce((sum, e) => sum + e.tip, 0);
-
-  const grossTotal = Math.max(sessionGross, grossEarningsFromItems);
-  const tipsTotal = Math.max(sessionTips, tipsFromItems);
-  const totalRevenue = grossTotal + tipsTotal;
+  const grossTotal = rangeTruth.grossTotal;
+  const tipsTotal = 0; // Já unificado no faturamento bruto da verdade financeira
+  const totalRevenue = grossTotal;
 
   const netProfit = totalRevenue - totalExpenses;
   const netMarginPercent = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
 
-  // KM e Horas
-  let totalKm = 0;
-  let totalHours = 0;
-
-  periodSessions.forEach(s => {
-    if (s.startOdometer && s.endOdometer && s.endOdometer >= s.startOdometer) {
-      totalKm += (s.endOdometer - s.startOdometer);
-    }
-    if (s.startTime && s.endTime) {
-      const durMs = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
-      totalHours += Math.max(0, durMs / (1000 * 60 * 60));
-    }
-  });
-
-  const totalTrips = Math.max(sessionTrips, periodEarnings.reduce((sum, e) => sum + (e.tripsCount || 1), 0));
+  // KM, Horas e Corridas consolidados pela Fonte Única da Verdade (FASE E)
+  const totalKm = rangeTruth.distanceKmTotal;
+  const totalHours = rangeTruth.durationHoursTotal;
+  const totalTrips = rangeTruth.tripsTotal;
   const grossPerHour = safeDivide(totalRevenue, totalHours);
   const netPerHour = safeDivide(netProfit, totalHours);
   const grossPerKm = safeDivide(totalRevenue, totalKm);
@@ -236,7 +229,7 @@ export const aggregateWeeklyData = (
   const goalTarget = profile.weeklyGoal || 1500;
   const goalAchievementPercent = safeDivide(totalRevenue, goalTarget) * 100;
 
-  // Construir 7 dias da semana
+  // Construir 7 dias da semana estritamente alinhados à Fonte Única da Verdade
   const dailyRows: WeeklyReportData['dailyRows'] = [];
   for (let i = 0; i < 7; i++) {
     const dayDate = new Date(range.startDate);
@@ -245,49 +238,17 @@ export const aggregateWeeklyData = (
     const dayFormatted = dayDate.toLocaleDateString('pt-BR');
     const dayName = getDayOfWeekName(dayDate);
 
-    // Filtrar sessões do dia
-    const daySessions = periodSessions.filter(s => s.startTime.startsWith(dayStr));
-    const dayEarnings = periodEarnings.filter(e => e.timestamp.startsWith(dayStr));
-    const dayExpenses = periodExpenses.filter(e => e.date === dayStr);
-    const dayFuel = periodFuel.filter(f => f.date === dayStr);
+    const dSummary = rangeTruth.daysSummaries.find(d => d.operationalDate === dayStr);
 
-    const dGross = daySessions.length > 0
-      ? daySessions.reduce((sum, s) => sum + s.grossEarnings, 0)
-      : dayEarnings.reduce((sum, e) => sum + e.amount, 0);
-
-    const dTips = daySessions.length > 0
-      ? daySessions.reduce((sum, s) => sum + s.tips, 0)
-      : dayEarnings.reduce((sum, e) => sum + e.tip, 0);
-
-    const dFuelExp = Math.max(
-      daySessions.reduce((sum, s) => sum + s.fuelExpenses, 0),
-      dayFuel.reduce((sum, f) => sum + f.totalAmount, 0)
-    );
-
-    const dOtherExp = Math.max(
-      daySessions.reduce((sum, s) => sum + s.otherExpenses, 0),
-      dayExpenses.reduce((sum, e) => sum + e.amount, 0)
-    );
-
-    const dTotalExp = dFuelExp + dOtherExp;
-    const dNet = (dGross + dTips) - dTotalExp;
-
-    let dKm = 0;
-    let dHours = 0;
-    daySessions.forEach(s => {
-      if (s.startOdometer && s.endOdometer && s.endOdometer >= s.startOdometer) {
-        dKm += (s.endOdometer - s.startOdometer);
-      }
-      if (s.startTime && s.endTime) {
-        const ms = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
-        dHours += Math.max(0, ms / (1000 * 60 * 60));
-      }
-    });
-
-    const dTrips = Math.max(
-      daySessions.reduce((sum, s) => sum + s.tripsCount, 0),
-      dayEarnings.reduce((sum, e) => sum + (e.tripsCount || 1), 0)
-    );
+    const dGross = dSummary ? dSummary.grossEarnings : 0;
+    const dTips = 0; // Já unificado no faturamento da verdade financeira
+    const dFuelExp = dSummary ? dSummary.fuelExpenses : 0;
+    const dOtherExp = dSummary ? dSummary.otherExpenses : 0;
+    const dTotalExp = dSummary ? dSummary.totalExpenses : 0;
+    const dNet = dSummary ? dSummary.netProfit : 0;
+    const dKm = dSummary ? dSummary.distanceKm : 0;
+    const dHours = dSummary ? dSummary.durationHours : 0;
+    const dTrips = dSummary ? dSummary.tripsCount : 0;
 
     dailyRows.push({
       dateStr: dayFormatted,
@@ -301,8 +262,8 @@ export const aggregateWeeklyData = (
       km: dKm,
       hours: dHours,
       trips: dTrips,
-      rateKm: safeDivide(dGross + dTips, dKm),
-      rateHour: safeDivide(dGross + dTips, dHours),
+      rateKm: safeDivide(dGross, dKm),
+      rateHour: safeDivide(dGross, dHours),
     });
   }
 
@@ -523,26 +484,32 @@ export const aggregateMonthlyData = (
     return t >= startTimeMs && t <= endTimeMs;
   });
 
-  // Ganhos brutos e gorjetas
-  const sessionGross = periodSessions.reduce((sum, s) => sum + s.grossEarnings, 0);
-  const sessionTips = periodSessions.reduce((sum, s) => sum + s.tips, 0);
-  const earningsGross = periodEarnings.reduce((sum, e) => sum + e.amount, 0);
-  const earningsTips = periodEarnings.reduce((sum, e) => sum + e.tip, 0);
+  // Totais consolidados via Fonte Única da Verdade (FASE D)
+  const dateStrings: string[] = [];
+  const curDate = new Date(range.startDate);
+  while (curDate <= range.endDate) {
+    dateStrings.push(curDate.toISOString().split('T')[0]);
+    curDate.setDate(curDate.getDate() + 1);
+  }
 
-  const grossTotal = Math.max(sessionGross, earningsGross);
-  const tipsTotal = Math.max(sessionTips, earningsTips);
-  const totalRevenue = grossTotal + tipsTotal;
+  const rangeTruth = calculateRangeFinancialTruth(
+    dateStrings,
+    sessions,
+    expenses,
+    fuelRecords,
+    earnings,
+    profile.fuelCalculationMethod || 'hibrido',
+    profile.timezone || DEFAULT_TIMEZONE
+  );
 
-  // Despesas diretas
-  const sessionFuelExp = periodSessions.reduce((sum, s) => sum + s.fuelExpenses, 0);
-  const directFuel = periodFuel.reduce((sum, f) => sum + f.totalAmount, 0);
-  const totalFuelCost = Math.max(sessionFuelExp, directFuel);
+  const grossTotal = rangeTruth.grossTotal;
+  const tipsTotal = 0;
+  const totalRevenue = grossTotal;
 
-  const sessionOtherExp = periodSessions.reduce((sum, s) => sum + s.otherExpenses, 0);
-  const directOtherExp = periodExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const totalOtherExp = Math.max(sessionOtherExp, directOtherExp);
-
-  const directExpenses = totalFuelCost + totalOtherExp;
+  // Despesas diretas consolidadas sem duplicidade
+  const totalFuelCost = rangeTruth.fuelTotal;
+  const totalOtherExp = rangeTruth.otherExpensesTotal;
+  const directExpenses = rangeTruth.expensesTotal;
 
   // Custos fixos do carro mensais
   const insuranceMonthly = vehicle.insuranceMonthly || 0;
@@ -556,31 +523,20 @@ export const aggregateMonthlyData = (
   const realNetProfit = totalRevenue - totalExpensesWithFixed;
   const netMarginPercent = totalRevenue > 0 ? (realNetProfit / totalRevenue) * 100 : 0;
 
-  // KM e Horas
-  let totalKm = 0;
-  let totalHours = 0;
-  const workedDaysSet = new Set<string>();
+  // KM, Horas e Corridas consolidados pela Fonte Única da Verdade (FASE E)
+  const totalKm = rangeTruth.distanceKmTotal;
+  const totalHours = rangeTruth.durationHoursTotal;
+  const totalTrips = rangeTruth.tripsTotal;
 
+  const workedDaysSet = new Set<string>();
   periodSessions.forEach(s => {
     workedDaysSet.add(s.startTime.split('T')[0]);
-    if (s.startOdometer && s.endOdometer && s.endOdometer >= s.startOdometer) {
-      totalKm += (s.endOdometer - s.startOdometer);
-    }
-    if (s.startTime && s.endTime) {
-      const ms = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
-      totalHours += Math.max(0, ms / (1000 * 60 * 60));
-    }
   });
-
   periodEarnings.forEach(e => {
     workedDaysSet.add(e.timestamp.split('T')[0]);
   });
 
   const daysWorkedCount = workedDaysSet.size || Math.max(1, periodSessions.length);
-  const totalTrips = Math.max(
-    periodSessions.reduce((sum, s) => sum + s.tripsCount, 0),
-    periodEarnings.reduce((sum, e) => sum + (e.tripsCount || 1), 0)
-  );
 
   const grossPerHour = safeDivide(totalRevenue, totalHours);
   const netPerHour = safeDivide(realNetProfit, totalHours);
@@ -597,44 +553,35 @@ export const aggregateMonthlyData = (
   const goalTarget = profile.monthlyGoal || 6000;
   const goalAchievementPercent = safeDivide(totalRevenue, goalTarget) * 100;
 
-  // Comparativo com mês anterior
+  // Comparativo com mês anterior via Fonte Única da Verdade
   const prevMonthDate = new Date(year, monthIndex - 1, 1);
   const prevYear = prevMonthDate.getFullYear();
   const prevMonthIdx = prevMonthDate.getMonth();
-  const prevRange = getMonthRange(prevYear, prevMonthIdx);
-  const prevStartMs = prevRange.startDate.getTime();
-  const prevEndMs = prevRange.endDate.getTime();
+  const prevDaysInMonth = new Date(prevYear, prevMonthIdx + 1, 0).getDate();
+  const prevDateStrings: string[] = [];
+  for (let d = 1; d <= prevDaysInMonth; d++) {
+    prevDateStrings.push(`${prevYear}-${String(prevMonthIdx + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
 
-  const prevSessions = sessions.filter(s => {
-    const t = new Date(s.startTime).getTime();
-    return t >= prevStartMs && t <= prevEndMs;
-  });
-  const prevExpensesList = expenses.filter(e => {
-    const t = new Date(e.date + 'T12:00:00').getTime();
-    return t >= prevStartMs && t <= prevEndMs;
-  });
-  const prevFuelList = fuelRecords.filter(f => {
-    const t = new Date(f.date + 'T12:00:00').getTime();
-    return t >= prevStartMs && t <= prevEndMs;
-  });
+  const prevTruth = calculateRangeFinancialTruth(
+    prevDateStrings,
+    sessions,
+    expenses,
+    fuelRecords,
+    earnings,
+    profile.fuelCalculationMethod || 'hibrido',
+    profile.timezone || DEFAULT_TIMEZONE
+  );
 
-  const prevGross = prevSessions.reduce((sum, s) => sum + s.grossEarnings + s.tips, 0);
-  const prevFuelExp = Math.max(
-    prevSessions.reduce((sum, s) => sum + s.fuelExpenses, 0),
-    prevFuelList.reduce((sum, f) => sum + f.totalAmount, 0)
-  );
-  const prevOtherExp = Math.max(
-    prevSessions.reduce((sum, s) => sum + s.otherExpenses, 0),
-    prevExpensesList.reduce((sum, e) => sum + e.amount, 0)
-  );
-  const prevExpenses = prevFuelExp + prevOtherExp;
-  const prevNet = prevGross - prevExpenses;
+  const prevGross = prevTruth.grossTotal;
+  const prevExpenses = prevTruth.expensesTotal;
+  const prevNet = prevTruth.netProfitTotal;
 
   const grossChangePercent = prevGross > 0 ? ((totalRevenue - prevGross) / prevGross) * 100 : 0;
   const expensesChangePercent = prevExpenses > 0 ? ((directExpenses - prevExpenses) / prevExpenses) * 100 : 0;
   const netChangePercent = prevNet > 0 ? ((grossOperatingProfit - prevNet) / prevNet) * 100 : 0;
 
-  // Quebra por semana (Semanas 1 a 5)
+  // Quebra por semana (Semanas 1 a 5) alinhada à Fonte Única da Verdade
   const weeklyBreakdown: MonthlyReportData['weeklyBreakdown'] = [];
   const daysInMonth = new Date(year, monthIndex + 1, 0).getDate();
   const weekCount = Math.ceil(daysInMonth / 7);
@@ -642,64 +589,29 @@ export const aggregateMonthlyData = (
   for (let w = 0; w < weekCount; w++) {
     const startDay = w * 7 + 1;
     const endDay = Math.min(daysInMonth, (w + 1) * 7);
-    const wStart = new Date(year, monthIndex, startDay, 0, 0, 0);
-    const wEnd = new Date(year, monthIndex, endDay, 23, 59, 59);
+    const wDateStrings: string[] = [];
+    for (let d = startDay; d <= endDay; d++) {
+      wDateStrings.push(`${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    }
 
-    const wSessions = periodSessions.filter(s => {
-      const t = new Date(s.startTime).getTime();
-      return t >= wStart.getTime() && t <= wEnd.getTime();
-    });
-
-    const wEarnings = periodEarnings.filter(e => {
-      const t = new Date(e.timestamp).getTime();
-      return t >= wStart.getTime() && t <= wEnd.getTime();
-    });
-
-    const wExpenses = periodExpenses.filter(e => {
-      const t = new Date(e.date + 'T12:00:00').getTime();
-      return t >= wStart.getTime() && t <= wEnd.getTime();
-    });
-
-    const wFuel = periodFuel.filter(f => {
-      const t = new Date(f.date + 'T12:00:00').getTime();
-      return t >= wStart.getTime() && t <= wEnd.getTime();
-    });
-
-    const wGross = Math.max(
-      wSessions.reduce((sum, s) => sum + s.grossEarnings + s.tips, 0),
-      wEarnings.reduce((sum, e) => sum + e.amount + e.tip, 0)
-    );
-
-    const wExp = Math.max(
-      wSessions.reduce((sum, s) => sum + s.fuelExpenses + s.otherExpenses, 0),
-      wFuel.reduce((sum, f) => sum + f.totalAmount, 0) + wExpenses.reduce((sum, e) => sum + e.amount, 0)
-    );
-
-    let wKm = 0;
-    let wHours = 0;
-    wSessions.forEach(s => {
-      if (s.startOdometer && s.endOdometer && s.endOdometer >= s.startOdometer) {
-        wKm += (s.endOdometer - s.startOdometer);
-      }
-      if (s.startTime && s.endTime) {
-        const dur = new Date(s.endTime).getTime() - new Date(s.startTime).getTime();
-        wHours += Math.max(0, dur / (1000 * 60 * 60));
-      }
-    });
-
-    const wTrips = Math.max(
-      wSessions.reduce((sum, s) => sum + s.tripsCount, 0),
-      wEarnings.reduce((sum, e) => sum + (e.tripsCount || 1), 0)
+    const wTruth = calculateRangeFinancialTruth(
+      wDateStrings,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      profile.timezone || DEFAULT_TIMEZONE
     );
 
     weeklyBreakdown.push({
       weekLabel: `Semana ${w + 1} (${startDay.toString().padStart(2, '0')}/${(monthIndex + 1).toString().padStart(2, '0')} a ${endDay.toString().padStart(2, '0')}/${(monthIndex + 1).toString().padStart(2, '0')})`,
-      gross: wGross,
-      expenses: wExp,
-      net: wGross - wExp,
-      km: wKm,
-      hours: wHours,
-      trips: wTrips,
+      gross: wTruth.grossTotal,
+      expenses: wTruth.expensesTotal,
+      net: wTruth.netProfitTotal,
+      km: wTruth.distanceKmTotal,
+      hours: wTruth.durationHoursTotal,
+      trips: wTruth.tripsTotal,
     });
   }
 

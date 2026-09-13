@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 
 export const InsightsView: React.FC = () => {
-  const { sessions, earnings, expenses, vehicle, profile } = useDriver();
+  const { sessions, earnings, expenses, fuelRecords, vehicle, profile } = useDriver();
   const [activeSubTab, setActiveSubTab] = useState<'all' | 'strategies' | 'simulator' | 'platforms' | 'passes' | 'vehicle' | 'financial'>('strategies');
 
   const insights = useMemo(() => {
@@ -68,7 +68,10 @@ export const InsightsView: React.FC = () => {
 
     // 2. ANÁLISE DE PESO DO COMBUSTÍVEL
     const totalGross = sessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
-    const totalFuel = sessions.reduce((acc, s) => acc + s.fuelExpenses, 0);
+    const fuelMethod = profile.fuelCalculationMethod || 'hibrido';
+    const totalFuel = fuelMethod === 'real_abastecimento' && fuelRecords.length > 0
+      ? fuelRecords.reduce((sum, f) => sum + f.totalAmount, 0)
+      : sessions.reduce((acc, s) => acc + s.fuelExpenses, 0);
     const fuelShare = safeDivide(totalFuel, totalGross) * 100;
 
     if (fuelShare > 30) {
@@ -115,7 +118,7 @@ export const InsightsView: React.FC = () => {
     }
 
     return items;
-  }, [sessions, earnings, expenses, vehicle, profile]);
+  }, [sessions, earnings, expenses, fuelRecords, vehicle, profile]);
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto">

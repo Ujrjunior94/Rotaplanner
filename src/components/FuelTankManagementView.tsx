@@ -6,8 +6,10 @@ import {
   formatKm,
   safeDivide,
   calcFuelParity,
+  calcSanderoLitersFromBarsAndAutonomy,
 } from '../utils/calc';
 import { FuelRecord } from '../types';
+
 import {
   Fuel,
   Sliders,
@@ -114,6 +116,41 @@ export const FuelTankManagementView: React.FC<FuelTankManagementViewProps> = ({
   const [ethPriceInput, setEthPriceInput] = useState<string>(
     profile.gasPriceReference ? (profile.gasPriceReference * 0.68).toFixed(2) : '3.99'
   );
+
+  // Calculadora Inteligente Sandero (Barras + Autonomia -> Litros)
+  const [sanderoCalcBars, setSanderoCalcBars] = useState<number>(5);
+  const [sanderoCalcAutonomy, setSanderoCalcAutonomy] = useState<string>('280');
+  
+  const sanderoCalcResult = useMemo(() => {
+    const autoKm = parseFloat(sanderoCalcAutonomy) || 0;
+    return calcSanderoLitersFromBarsAndAutonomy({
+      bars: sanderoCalcBars,
+      autonomyKm: autoKm,
+      tankCapacity,
+      avgConsumption,
+      totalBars,
+    });
+  }, [sanderoCalcBars, sanderoCalcAutonomy, tankCapacity, avgConsumption, totalBars]);
+
+  // Sincronizar o resultado do cálculo com o tanque
+  const handleApplySanderoCalcToTank = (asBaseZero = false) => {
+    const litersToApply = sanderoCalcResult.recommendedLiters;
+    setTankConfig(prev => ({
+      ...prev,
+      manualLiters: litersToApply,
+      mode: asBaseZero ? 'auto' : 'manual',
+      baseLiters: asBaseZero ? litersToApply : prev.baseLiters,
+      baseOdometer: asBaseZero ? vehicle.currentOdometer : prev.baseOdometer,
+      baseDate: new Date().toISOString().split('T')[0],
+    }));
+
+    if (asBaseZero) {
+      showToast(`Tanque calibrado para ${litersToApply.toFixed(1)} L e salvo como novo Marco Zero (Auto)!`);
+    } else {
+      showToast(`Tanque calibrado para ${litersToApply.toFixed(1)} L (${sanderoCalcBars}/8 barras)!`);
+    }
+  };
+
 
   // Ordenar abastecimentos do mais recente para o mais antigo
   const sortedFuelRecords = useMemo(() => {
@@ -431,8 +468,209 @@ export const FuelTankManagementView: React.FC<FuelTankManagementViewProps> = ({
         onSetLiters={handleSetManualLiters}
       />
 
+      {/* CALCULADORA DE LITROS DO SANDERO (BARRAS + AUTONOMIA DO PAINEL) */}
+      <div className="bg-gradient-to-br from-amber-950/30 via-slate-900 to-slate-950 border-2 border-amber-500/40 p-5 sm:p-6 rounded-3xl space-y-5 shadow-2xl relative overflow-hidden">
+        
+        {/* CABEÇALHO DA FERRAMENTA */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-amber-500/20 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 font-bold shadow-inner">
+              <Calculator className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm sm:text-base font-black text-white font-mono uppercase tracking-wider flex items-center gap-2">
+                CÁLCULO DE LITROS DO SANDERO (BARRAS + AUTONOMIA)
+              </h3>
+              <p className="text-xs text-slate-300">
+                Informe as barras e a autonomia do cluster para calcular com precisão os litros no tanque
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono font-bold text-amber-400 bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 rounded-full">
+              Tanque: {tankCapacity}L • Média: {avgConsumption.toFixed(1)} km/L
+            </span>
+          </div>
+        </div>
+
+        {/* INPUTS: BARRAS & AUTONOMIA */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          {/* 1. SELETOR DE BARRAS LCD DO SANDERO */}
+          <div className="bg-black/60 p-4 rounded-2xl border border-white/10 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-black text-white uppercase font-mono flex items-center gap-1.5">
+                <span>1. Quantas Barras Estão Acesas?</span>
+              </label>
+              <span className="text-xs font-black font-mono text-amber-400">
+                {sanderoCalcBars === 0 ? '0 / Reserva (0L)' : `${sanderoCalcBars} de 8 barras (~${sanderoCalcResult.litersFromBars.toFixed(1)} L)`}
+              </span>
+            </div>
+
+            {/* SELETOR INTERATIVO DE 0 A 8 */}
+            <div className="grid grid-cols-9 gap-1.5">
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8].map(barNum => {
+                const isSelected = sanderoCalcBars === barNum;
+                const isReserve = barNum === 0 || barNum === 1;
+
+                return (
+                  <button
+                    key={barNum}
+                    type="button"
+                    onClick={() => setSanderoCalcBars(barNum)}
+                    className={`h-11 rounded-xl font-mono text-xs font-black flex flex-col items-center justify-center transition border active:scale-95 ${
+                      isSelected
+                        ? isReserve && barNum === 0
+                          ? 'bg-orange-600 text-white border-orange-400 shadow-lg shadow-orange-600/40 ring-2 ring-orange-400'
+                          : 'bg-gradient-to-t from-amber-500 to-amber-400 text-slate-950 border-amber-300 shadow-lg shadow-amber-500/40 ring-2 ring-amber-300'
+                        : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:bg-slate-700 hover:text-white'
+                    }`}
+                  >
+                    <span>{barNum === 0 ? 'R' : barNum}</span>
+                    <span className="text-[9px] opacity-75 font-normal">
+                      {barNum === 0 ? '0L' : `${Math.round((barNum / 8) * 100)}%`}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[11px] text-slate-400 font-mono">
+              * Cada barra do Sandero (50L) corresponde a exatamente <strong>6,25 Litros</strong>.
+            </p>
+          </div>
+
+          {/* 2. AUTONOMIA EXIBIDA NO COMPUTADOR DE BORDO */}
+          <div className="bg-black/60 p-4 rounded-2xl border border-white/10 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-black text-white uppercase font-mono flex items-center gap-1.5">
+                <span>2. Autonomia Marcada no Painel</span>
+              </label>
+              <span className="text-[11px] text-slate-400 font-mono">
+                (Computador de Bordo)
+              </span>
+            </div>
+
+            <div className="relative">
+              <input
+                type="number"
+                placeholder="Ex: 280 (KM no cluster do Sandero)"
+                value={sanderoCalcAutonomy}
+                onChange={e => setSanderoCalcAutonomy(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-2xl px-4 py-3 text-sm text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-400 focus:ring-1 focus:ring-amber-400"
+              />
+              <span className="absolute right-4 top-3.5 text-xs font-mono text-amber-400 font-black">
+                KM
+              </span>
+            </div>
+
+            {/* ATALHOS RÁPIDOS DE AUTONOMIA */}
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-slate-400 font-bold uppercase">Atalhos:</span>
+              {[80, 150, 250, 350, 450, 550].map(kmVal => (
+                <button
+                  key={kmVal}
+                  type="button"
+                  onClick={() => setSanderoCalcAutonomy(kmVal.toString())}
+                  className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] font-mono text-slate-300 transition"
+                >
+                  {kmVal} km
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* CARTÃO DE RESULTADO E DADOS CALCULADOS */}
+        <div className="bg-black/80 border border-amber-500/30 rounded-2xl p-4 sm:p-5 space-y-4 shadow-inner">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            
+            {/* LITROS NO TANQUE (PRINCIPAL) */}
+            <div className="bg-amber-950/30 border border-amber-500/30 p-3.5 rounded-xl">
+              <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wider block">
+                LITROS NO TANQUE
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-1">
+                <span className="text-3xl sm:text-4xl font-black font-mono text-white">
+                  {sanderoCalcResult.recommendedLiters.toFixed(1)}
+                </span>
+                <span className="text-lg font-black font-mono text-amber-400">L</span>
+                <span className="text-xs font-mono text-slate-400 ml-1">/ {tankCapacity}L</span>
+              </div>
+              <span className="text-[11px] font-mono text-amber-300 block mt-0.5">
+                {sanderoCalcResult.barsPercentage}% do volume total
+              </span>
+            </div>
+
+            {/* AUTONOMIA CORRESPONDENTE */}
+            <div className="bg-slate-900/80 border border-white/10 p-3.5 rounded-xl">
+              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                AUTONOMIA CALCULADA
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-1">
+                <span className="text-3xl sm:text-4xl font-black font-mono text-emerald-400">
+                  {parseFloat(sanderoCalcAutonomy) > 0 ? parseFloat(sanderoCalcAutonomy) : sanderoCalcResult.autonomyEstimatedFromBars}
+                </span>
+                <span className="text-lg font-black font-mono text-white">KM</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-400 block mt-0.5">
+                Com média de {avgConsumption.toFixed(1)} km/L
+              </span>
+            </div>
+
+            {/* MÉDIA INFERIDA PELO CARRO */}
+            <div className="bg-slate-900/80 border border-white/10 p-3.5 rounded-xl">
+              <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider block">
+                MÉDIA INFERIDA PELO PAINEL
+              </span>
+              <div className="flex items-baseline gap-1.5 mt-1">
+                <span className="text-3xl sm:text-4xl font-black font-mono text-sky-400">
+                  {sanderoCalcResult.impliedConsumption.toFixed(1)}
+                </span>
+                <span className="text-base font-black font-mono text-white">km/L</span>
+              </div>
+              <span className="text-[11px] font-mono text-slate-400 block mt-0.5">
+                Autonomia informada ÷ Litros
+              </span>
+            </div>
+          </div>
+
+          {/* EXPLICAÇÃO DO CÁLCULO */}
+          <div className="p-3 rounded-xl bg-white/5 border border-white/10 flex items-start gap-2.5">
+            <Info className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-slate-300 font-mono leading-relaxed">
+              {sanderoCalcResult.explanation}
+            </p>
+          </div>
+
+          {/* BOTÕES DE AÇÃO IMEDIATA */}
+          <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => handleApplySanderoCalcToTank(false)}
+              className="w-full sm:w-auto px-5 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 transition active:scale-95"
+            >
+              <Check className="w-4 h-4 stroke-[3]" />
+              <span>Sincronizar com o Tanque ({sanderoCalcResult.recommendedLiters.toFixed(1)} L)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleApplySanderoCalcToTank(true)}
+              className="w-full sm:w-auto px-4 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition active:scale-95"
+              title="Salva os litros calculados e o odômetro atual como ponto de partida para o rastreamento automático"
+            >
+              <Zap className="w-4 h-4" />
+              <span>Salvar Marco Zero (Modo Auto)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* CONTROLES E CALIBRAÇÃO CONFORME O MODO SELECIONADO */}
       {tankConfig.mode === 'manual' ? (
+
         /* PAINEL DE CONTROLE MANUAL */
         <div className="bg-purple-950/20 border border-purple-500/30 p-5 rounded-3xl space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

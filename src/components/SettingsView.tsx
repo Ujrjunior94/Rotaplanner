@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useDriver } from '../context/DriverContext';
 import { usePWA } from '../hooks/usePWA';
 import {
@@ -19,6 +19,10 @@ import {
   Share,
   PlusSquare,
   Calculator,
+  FileJson,
+  Database,
+  FileCheck,
+  AlertCircle,
 } from 'lucide-react';
 import { RecalculateRecordsModal } from './RecalculateRecordsModal';
 import { DashboardCardsCustomizer } from './DashboardCardsCustomizer';
@@ -33,10 +37,60 @@ export const SettingsView: React.FC = () => {
     exportDataJSON,
     exportDataCSV,
     importDataJSON,
+    downloadFullBackup,
+    getLocalSnapshotData,
     isDemoData,
   } = useDriver();
 
   const [showRecalculateModal, setShowRecalculateModal] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<'idle' | 'creating' | 'success' | 'error'>('idle');
+  const [backupResult, setBackupResult] = useState<{
+    filename: string;
+    sizeBytes: number;
+    totalRecords: number;
+    timestamp: string;
+  } | null>(null);
+  const [localSnapshotInfo, setLocalSnapshotInfo] = useState<{
+    createdAt: string;
+    totalRecords: number;
+    schemaVersion: number;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const snap = getLocalSnapshotData();
+      if (snap) {
+        setLocalSnapshotInfo({
+          createdAt: snap.metadata.createdAt,
+          totalRecords: snap.statistics.totalRecords,
+          schemaVersion: snap.metadata.schemaVersion,
+        });
+      }
+    } catch {
+      // silencioso
+    }
+  }, [backupStatus]);
+
+  const handleDownloadFullBackup = async () => {
+    setBackupStatus('creating');
+    try {
+      const res = await downloadFullBackup();
+      if (res.success) {
+        setBackupResult({
+          filename: res.filename,
+          sizeBytes: res.sizeBytes,
+          totalRecords: res.totalRecords,
+          timestamp: new Date().toLocaleTimeString('pt-BR'),
+        });
+        setBackupStatus('success');
+      } else {
+        setBackupStatus('error');
+      }
+    } catch (err) {
+      console.error('Erro ao gerar backup:', err);
+      setBackupStatus('error');
+    }
+  };
 
   const {
     isInstallable,
@@ -172,14 +226,117 @@ export const SettingsView: React.FC = () => {
         <DashboardCardsCustomizer />
       </div>
 
-      {/* BACKUP & EXPORTAÇÃO */}
+      {/* BACKUP E SEGURANÇA */}
       <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 sm:p-6 rounded-2xl space-y-4">
-        <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
-          <Download className="w-4 h-4 text-teal-400" />
-          BACKUP, IMPORTAÇÃO & EXPORTAÇÃO
-        </h3>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-white/10 pb-3">
+          <div>
+            <h3 className="text-xs font-black text-white uppercase tracking-wider flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+              BACKUP E SEGURANÇA
+            </h3>
+            <p className="text-xs text-slate-400 mt-1">
+              Faça uma cópia completa dos seus dados antes de alterações importantes no sistema.
+            </p>
+          </div>
+          <span className="text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2.5 py-1 rounded-full w-fit">
+            Schema v2 • Offline-First
+          </span>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {/* STATUS VISUAL DO BACKUP */}
+        {backupStatus === 'success' && backupResult && (
+          <div className="bg-emerald-500/15 border border-emerald-500/30 p-4 rounded-xl flex items-start gap-3">
+            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+            <div className="text-xs space-y-1">
+              <div className="font-bold text-emerald-300">
+                Backup criado com sucesso.
+              </div>
+              <div className="text-[11px] text-slate-300">
+                Arquivo: <span className="font-mono font-bold text-white">{backupResult.filename}</span>
+              </div>
+              <div className="text-[11px] text-slate-400 flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                <span>Total de registros: <strong className="text-emerald-300">{backupResult.totalRecords}</strong></span>
+                <span>Tamanho: <strong className="text-white">{(backupResult.sizeBytes / 1024).toFixed(1)} KB</strong></span>
+                <span>Horário: <strong className="text-white">{backupResult.timestamp}</strong></span>
+                <span>Versão do schema: <strong className="text-white">v2</strong></span>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {backupStatus === 'error' && (
+          <div className="bg-rose-500/15 border border-rose-500/30 p-4 rounded-xl flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <div className="font-bold text-rose-300">
+                Não foi possível criar o backup. Nenhum dado foi alterado.
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                Verifique as permissões de download do navegador e tente novamente.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* BOTÃO PRINCIPAL DE BACKUP PREVENTIVO */}
+        <div className="bg-gradient-to-r from-emerald-950/30 to-slate-900 border border-emerald-500/30 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-black shrink-0">
+              <FileJson className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-white flex items-center gap-2">
+                Snapshot Completo Pré-Migração
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono font-bold">
+                  JSON Estruturado
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                Captura todas as sessões, despesas, hodômetros, veículos, metas e preferências sem modificar nenhum dado.
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            disabled={backupStatus === 'creating'}
+            onClick={handleDownloadFullBackup}
+            className="bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 active:scale-95 transition shrink-0"
+          >
+            {backupStatus === 'creating' ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Criando backup...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-4 h-4" />
+                <span>Baixar Backup Completo</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* SNAPSHOT LOCAL PREVENTIVO REGISTRADO */}
+        {localSnapshotInfo && (
+          <div className="bg-black/30 border border-white/10 p-3.5 rounded-xl flex items-center justify-between text-xs">
+            <div className="flex items-center gap-2.5 text-slate-300">
+              <Database className="w-4 h-4 text-teal-400 shrink-0" />
+              <div>
+                <span className="text-[11px] text-slate-400 block">Cópia Local de Segurança Registrada no Navegador:</span>
+                <span className="font-mono text-white text-[11px]">
+                  {new Date(localSnapshotInfo.createdAt).toLocaleString('pt-BR')} • {localSnapshotInfo.totalRecords} registros • Schema v{localSnapshotInfo.schemaVersion}
+                </span>
+              </div>
+            </div>
+            <span className="text-[10px] bg-teal-500/20 text-teal-300 px-2 py-0.5 rounded-full font-bold border border-teal-500/30">
+              Armazenado Local
+            </span>
+          </div>
+        )}
+
+        {/* OUTRAS OPÇÕES: CSV E RESTAURAÇÃO */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
           <button
             onClick={exportDataCSV}
             className="bg-white/5 hover:bg-white/10 p-4 rounded-xl border border-white/10 text-left transition flex items-center gap-3"
@@ -189,34 +346,20 @@ export const SettingsView: React.FC = () => {
             </div>
             <div>
               <div className="text-xs font-bold text-slate-200">Exportar Extrato (CSV/Excel)</div>
-              <div className="text-[11px] text-slate-400">Planilha formatada com todos os registros</div>
+              <div className="text-[11px] text-slate-400">Planilha formatada com todos os lançamentos</div>
             </div>
           </button>
 
-          <button
-            onClick={exportDataJSON}
-            className="bg-white/5 hover:bg-white/10 p-4 rounded-xl border border-white/10 text-left transition flex items-center gap-3"
-          >
-            <div className="w-9 h-9 rounded-xl bg-teal-500/20 text-teal-400 flex items-center justify-center font-black shrink-0">
-              JSON
-            </div>
+          <div className="bg-black/30 p-4 rounded-xl border border-white/10 flex items-center justify-between gap-3">
             <div>
-              <div className="text-xs font-bold text-slate-200">Backup Completo (JSON)</div>
-              <div className="text-[11px] text-slate-400">Salva configurações, metas e histórico</div>
+              <div className="text-xs font-bold text-slate-200">Restaurar Backup Anterior</div>
+              <div className="text-[11px] text-slate-400">Carregue um arquivo .json salvo</div>
             </div>
-          </button>
-        </div>
-
-        {/* RESTAURAR BACKUP */}
-        <div className="bg-black/30 p-4 rounded-xl border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="text-xs font-bold text-slate-200">Restaurar Backup Anterior</div>
-            <div className="text-[11px] text-slate-400">Carregue um arquivo .json salvo anteriormente</div>
+            <label className="bg-white/10 hover:bg-white/15 text-slate-200 font-bold px-3 py-2 rounded-xl text-xs border border-white/10 cursor-pointer text-center shrink-0">
+              Selecionar JSON
+              <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+            </label>
           </div>
-          <label className="bg-white/10 hover:bg-white/15 text-slate-200 font-bold px-4 py-2 rounded-xl text-xs border border-white/10 cursor-pointer text-center">
-            Selecionar Arquivo JSON
-            <input type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
-          </label>
         </div>
       </div>
 

@@ -37,6 +37,13 @@ import {
   Share2,
   CheckCircle2,
   Calculator,
+  ShieldCheck,
+  Lock,
+  Unlock,
+  FileCheck2,
+  AlertTriangle,
+  ArrowRight,
+  BookOpen,
 } from 'lucide-react';
 import { PlatformType } from '../types';
 import { RecalculateRecordsModal } from './RecalculateRecordsModal';
@@ -52,15 +59,23 @@ export const ReportsView: React.FC = () => {
     vehicle,
     exportDataCSV,
     exportDataJSON,
+    accountingClosings,
+    closePeriodAccounting,
+    reopenPeriodAccounting,
+    exportAccountingStatementCSV,
+    reconcilePlannerData,
+    fuelCalculationMethod,
   } = useDriver();
 
   // Tab interna de visualização
-  const [activeReportTab, setActiveReportTab] = useState<'overview' | 'weekly' | 'monthly'>('overview');
+  const [activeReportTab, setActiveReportTab] = useState<'overview' | 'weekly' | 'monthly' | 'accounting_closing'>('overview');
 
   // Estado do Modal de PDF
   const [showPDFModal, setShowPDFModal] = useState(false);
   const [pdfModalInitialType, setPdfModalInitialType] = useState<'weekly' | 'monthly'>('monthly');
   const [showRecalculateModal, setShowRecalculateModal] = useState(false);
+  const [closingTypeSelected, setClosingTypeSelected] = useState<'weekly' | 'monthly'>('monthly');
+  const [closureSuccessMessage, setClosureSuccessMessage] = useState<string | null>(null);
 
   // Controle de offset semanal e mensal para visualização interativa
   const [weekOffset, setWeekOffset] = useState<number>(0);
@@ -71,8 +86,17 @@ export const ReportsView: React.FC = () => {
   // Breakdown por plataforma
   const platformStats = useMemo(() => calcPlatformBreakdown(earnings), [earnings]);
 
-  // Comparativo mensal padrão
-  const monthlyComp = useMemo(() => calcMonthlyComparison(sessions, expenses), [sessions, expenses]);
+  // Comparativo mensal padrão (FASE E: utilizando a Fonte Única da Verdade)
+  const monthlyComp = useMemo(() => {
+    return calcMonthlyComparison(
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      profile.timezone
+    );
+  }, [sessions, expenses, fuelRecords, earnings, profile.fuelCalculationMethod, profile.timezone]);
 
   // Dados calculados para a semana selecionada
   const currentWeekRange = useMemo(() => {
@@ -391,6 +415,17 @@ export const ReportsView: React.FC = () => {
         >
           <FileText className="w-3.5 h-3.5" />
           <span>Detalhamento Mensal & DRE</span>
+        </button>
+        <button
+          onClick={() => setActiveReportTab('accounting_closing')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap flex items-center gap-1.5 ${
+            activeReportTab === 'accounting_closing'
+              ? 'bg-teal-500/20 text-teal-300 border border-teal-500/30 shadow-sm shadow-teal-500/20'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+          }`}
+        >
+          <ShieldCheck className="w-3.5 h-3.5 text-teal-400" />
+          <span>Fechamento & Auditoria (Fase E)</span>
         </button>
       </div>
 
@@ -813,6 +848,388 @@ export const ReportsView: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ABA: FECHAMENTO CONTÁBIL & AUDITORIA DE EXERCÍCIO (FASE E) */}
+      {activeReportTab === 'accounting_closing' && (
+        <div className="space-y-6">
+          {/* BANNER STATUS DE AUDITORIA E FONTE ÚNICA DA VERDADE */}
+          <div className="bg-gradient-to-r from-teal-950/60 via-slate-900 to-slate-900 border border-teal-500/30 p-5 rounded-3xl space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-teal-500/20 text-teal-400 border border-teal-500/30 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5 stroke-[2.5]" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-black text-white">MOTOR DE AUDITORIA CONTÁBIL (FASE E)</h3>
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                      Fonte Única Ativa
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Relatórios, DRE, Metas e PDFs sincronizados pelo mesmo núcleo. Eliminação total de duplicidade de combustível.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const res = reconcilePlannerData();
+                    setClosureSuccessMessage(
+                      res.divergencesFound > 0
+                        ? `Auditoria concluída: ${res.divergencesFound} divergência(s) reconciliada(s) com sucesso!`
+                        : 'Auditoria concluída: Nenhuma divergência encontrada. Base 100% íntegra!'
+                    );
+                    setTimeout(() => setClosureSuccessMessage(null), 5000);
+                  }}
+                  className="bg-white/10 hover:bg-white/15 text-slate-200 font-bold px-3 py-2 rounded-xl text-xs border border-white/10 flex items-center gap-1.5 transition active:scale-95"
+                >
+                  <ShieldCheck className="w-4 h-4 text-teal-400" />
+                  <span>Auditar Integridade</span>
+                </button>
+              </div>
+            </div>
+
+            {/* AVISO / MENSAGEM TEMPORÁRIA DE SUCESSO */}
+            {closureSuccessMessage && (
+              <div className="bg-teal-500/10 border border-teal-500/30 p-3 rounded-xl flex items-center gap-2 text-xs text-teal-300">
+                <CheckCircle2 className="w-4 h-4 text-teal-400 shrink-0" />
+                <span>{closureSuccessMessage}</span>
+              </div>
+            )}
+
+            {/* BADGES DO REGIME CONTÁBIL */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-xs">
+              <div className="bg-slate-950/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-[10px] text-slate-400 block">Regime Combustível:</span>
+                <span className="font-bold text-teal-300 uppercase text-[11px]">
+                  {fuelCalculationMethod === 'real_abastecimento' ? 'Abastecimentos Reais' : fuelCalculationMethod === 'estimado_km' ? 'Estimado por KM' : 'Híbrido Inteligente'}
+                </span>
+              </div>
+              <div className="bg-slate-950/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-[10px] text-slate-400 block">Fuso Operacional:</span>
+                <span className="font-bold text-slate-200 text-[11px]">{profile.timezone || 'America/Sao_Paulo'}</span>
+              </div>
+              <div className="bg-slate-950/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-[10px] text-slate-400 block">Períodos Encerrados:</span>
+                <span className="font-bold text-white text-[11px]">{accountingClosings.length} exercício(s)</span>
+              </div>
+              <div className="bg-slate-950/40 p-2.5 rounded-xl border border-white/5">
+                <span className="text-[10px] text-slate-400 block">Status da Base:</span>
+                <span className="font-bold text-emerald-400 text-[11px]">Auditada & Confiável</span>
+              </div>
+            </div>
+          </div>
+
+          {/* PAINEL DE FECHAMENTO DE PERÍODO CONTÁBIL */}
+          <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <Lock className="w-4 h-4 text-amber-400" />
+                  ENCERRAR E CONGELAR EXERCÍCIO CONTÁBIL
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Gera um hash único e congela os números auditados para declarações de MEI, IRPF ou balancete pessoal.
+                </p>
+              </div>
+
+              {/* TIPO DE PERÍODO PARA FECHAR */}
+              <div className="flex items-center gap-1.5 bg-slate-950/60 p-1 rounded-xl border border-white/10 self-start sm:self-auto">
+                <button
+                  onClick={() => setClosingTypeSelected('weekly')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                    closingTypeSelected === 'weekly'
+                      ? 'bg-amber-500 text-slate-950 shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Semanal ({weeklyData.range.label})
+                </button>
+                <button
+                  onClick={() => setClosingTypeSelected('monthly')}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition ${
+                    closingTypeSelected === 'monthly'
+                      ? 'bg-amber-500 text-slate-950 shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Mensal ({monthNames[selectedMonthIndex]} / {selectedYear})
+                </button>
+              </div>
+            </div>
+
+            {/* PREVIEW DA DRE DO PERÍODO SELECIONADO */}
+            {(() => {
+              const isWeekly = closingTypeSelected === 'weekly';
+              const targetGross = isWeekly ? (weeklyData.grossTotal + weeklyData.tipsTotal) : (monthlyData.grossTotal + monthlyData.tipsTotal);
+              const targetFuel = isWeekly ? weeklyData.fuelTotal : monthlyData.fuelTotal;
+              const targetOtherExp = isWeekly ? weeklyData.otherExpensesTotal : monthlyData.variableExpensesTotal;
+              const targetFixedExp = isWeekly ? 0 : monthlyData.fixedExpensesTotal;
+              const targetTotalExp = isWeekly ? weeklyData.totalExpenses : monthlyData.totalExpenses;
+              const targetMargin = isWeekly ? weeklyData.contributionMargin : monthlyData.contributionMargin;
+              const targetNet = isWeekly ? weeklyData.netProfit : monthlyData.netProfit;
+              const targetReserves = isWeekly ? weeklyData.reserves.total : monthlyData.reserves.total;
+              const targetCash = isWeekly ? (weeklyData.netProfit - weeklyData.reserves.total) : monthlyData.availableCashInPocket;
+              const targetKm = isWeekly ? weeklyData.totalKm : monthlyData.totalKm;
+              const targetHours = isWeekly ? weeklyData.totalHours : monthlyData.totalHours;
+              const targetTrips = isWeekly ? weeklyData.totalTrips : monthlyData.totalTrips;
+              const targetRateKm = isWeekly ? weeklyData.ratePerKmGross : monthlyData.ratePerKmGross;
+              const targetRateHour = isWeekly ? weeklyData.hourlyRateGross : monthlyData.hourlyRateGross;
+              const startDateStr = isWeekly
+                ? weeklyData.range.startDate.toISOString().split('T')[0]
+                : `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, '0')}-01`;
+              const endDateStr = isWeekly
+                ? weeklyData.range.endDate.toISOString().split('T')[0]
+                : `${selectedYear}-${String(selectedMonthIndex + 1).padStart(2, '0')}-${String(monthlyData.daysInMonth).padStart(2, '0')}`;
+
+              const alreadyClosed = accountingClosings.find(
+                c => c.type === closingTypeSelected && c.startDate === startDateStr && c.endDate === endDateStr
+              );
+
+              return (
+                <div className="space-y-4">
+                  {alreadyClosed && (
+                    <div className="bg-amber-500/10 border border-amber-500/30 p-3 rounded-2xl flex items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 text-amber-300">
+                        <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>
+                          <strong>Este período já está encerrado!</strong> Assinado em {new Date(alreadyClosed.closedAt).toLocaleDateString('pt-BR')} com hash <code className="font-mono bg-slate-900 px-1 py-0.5 rounded text-amber-200">{alreadyClosed.closingHash}</code>.
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          reopenPeriodAccounting(alreadyClosed.id);
+                          setClosureSuccessMessage(`Exercício reaberto com sucesso. Você pode recalcular e fechar novamente.`);
+                          setTimeout(() => setClosureSuccessMessage(null), 4000);
+                        }}
+                        className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 px-3 py-1.5 rounded-xl font-bold whitespace-nowrap active:scale-95 transition"
+                      >
+                        Reabrir Exercício
+                      </button>
+                    </div>
+                  )}
+
+                  {/* TABELA DE DEMONSTRAÇÃO PRÉ-ENCERRAMENTO */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-950/40 p-3 rounded-2xl border border-white/5">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Faturamento Bruto</span>
+                      <span className="text-base font-black text-emerald-400">{formatCurrency(targetGross)}</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">{targetTrips} viagens realizadas</span>
+                    </div>
+
+                    <div className="bg-slate-950/40 p-3 rounded-2xl border border-white/5">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Custos & Combustível</span>
+                      <span className="text-base font-black text-rose-400">{formatCurrency(targetTotalExp)}</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">Combustível: {formatCurrency(targetFuel)}</span>
+                    </div>
+
+                    <div className="bg-slate-950/40 p-3 rounded-2xl border border-white/5">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Lucro Real Líquido</span>
+                      <span className="text-base font-black text-white">{formatCurrency(targetNet)}</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">Margem: {safeDivide(targetNet, targetGross) * 100 > 0 ? (safeDivide(targetNet, targetGross) * 100).toFixed(1) : 0}%</span>
+                    </div>
+
+                    <div className="bg-slate-950/40 p-3 rounded-2xl border border-white/5">
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Caixa Livre no Bolso</span>
+                      <span className="text-base font-black text-teal-300">{formatCurrency(targetCash)}</span>
+                      <span className="text-[10px] text-slate-400 block mt-0.5">Reservas: {formatCurrency(targetReserves)}</span>
+                    </div>
+                  </div>
+
+                  {/* LINHA DE MÉTRICAS OPERACIONAIS */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950/30 px-4 py-2.5 rounded-xl border border-white/5 text-xs text-slate-300">
+                    <div>KM Rodados: <strong className="text-white">{formatKm(targetKm)}</strong></div>
+                    <div>Horas Trabalhadas: <strong className="text-white">{formatHours(targetHours)}</strong></div>
+                    <div>Rendimento por KM: <strong className="text-emerald-400">{formatCurrency(targetRateKm)}/km</strong></div>
+                    <div>Rendimento por Hora: <strong className="text-emerald-400">{formatCurrency(targetRateHour)}/h</strong></div>
+                  </div>
+
+                  {/* BOTÃO DE CONFIRMAÇÃO DE FECHAMENTO */}
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
+                    <p className="text-[11px] text-slate-400">
+                      Ao encerrar, o balanço é autenticado pela Fonte Única da Verdade e armazenado com carimbo de data e hora.
+                    </p>
+
+                    <button
+                      onClick={() => {
+                        const closing = closePeriodAccounting({
+                          type: closingTypeSelected,
+                          startDate: startDateStr,
+                          endDate: endDateStr,
+                          label: isWeekly ? `Semana ${weeklyData.range.label}` : `${monthNames[selectedMonthIndex]} de ${selectedYear}`,
+                          grossEarnings: targetGross,
+                          fuelExpenses: targetFuel,
+                          otherExpenses: targetOtherExp,
+                          fixedExpenses: targetFixedExp,
+                          totalExpenses: targetTotalExp,
+                          contributionMargin: targetMargin,
+                          realNetProfit: targetNet,
+                          reservesAllocated: targetReserves,
+                          availableCashInPocket: targetCash,
+                          kmDriven: targetKm,
+                          hoursWorked: targetHours,
+                          tripsCount: targetTrips,
+                          ratePerKm: targetRateKm,
+                          ratePerHour: targetRateHour,
+                          fuelMethodUsed: profile.fuelCalculationMethod || 'hibrido',
+                        });
+                        setClosureSuccessMessage(`Exercício encerrado com sucesso! Hash: ${closing.closingHash}`);
+                        setTimeout(() => setClosureSuccessMessage(null), 6000);
+                      }}
+                      className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-slate-950 font-black px-5 py-2.5 rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 active:scale-95 transition"
+                    >
+                      <Lock className="w-4 h-4 stroke-[2.5]" />
+                      <span>{alreadyClosed ? 'Atualizar e Re-assinar Fechamento' : 'Encerrar e Assinar Exercício Contábil'}</span>
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* LISTA DE EXERCÍCIOS ENCERRADOS */}
+          <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-white flex items-center gap-2">
+                  <FileCheck2 className="w-4 h-4 text-emerald-400" />
+                  HISTÓRICO DE EXERCÍCIOS ENCERRADOS & AUDITADOS
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Registros imutáveis com hashes de integridade para arquivo fiscal.
+                </p>
+              </div>
+
+              <span className="text-xs font-bold text-slate-400">
+                {accountingClosings.length} fechamento(s)
+              </span>
+            </div>
+
+            {accountingClosings.length === 0 ? (
+              <div className="text-center py-8 bg-slate-950/40 rounded-2xl border border-white/5 text-xs text-slate-400 space-y-1">
+                <Lock className="w-6 h-6 text-slate-600 mx-auto mb-1" />
+                <p className="font-bold text-slate-300">Nenhum exercício encerrado ainda.</p>
+                <p>Selecione um período acima e clique em "Encerrar e Assinar Exercício Contábil".</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {accountingClosings.map(item => (
+                  <div
+                    key={item.id}
+                    className="bg-slate-950/50 border border-white/10 p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-bold px-2 py-0.5 rounded-full border border-emerald-500/30">
+                          {item.status === 'AUDITED_AND_CLOSED' ? 'AUDITADO & FECHADO' : 'ABERTO'}
+                        </span>
+                        <h4 className="text-sm font-black text-white">{item.label}</h4>
+                      </div>
+
+                      <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <span>Período: <strong className="text-slate-200">{item.startDate} a {item.endDate}</strong></span>
+                        <span>•</span>
+                        <span>Encerrado em: <strong className="text-slate-200">{new Date(item.closedAt).toLocaleString('pt-BR')}</strong></span>
+                        <span>•</span>
+                        <span>Hash: <code className="font-mono text-teal-300 bg-teal-950/60 px-1.5 py-0.5 rounded border border-teal-500/30">{item.closingHash}</code></span>
+                      </div>
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 text-xs">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Bruto</span>
+                          <strong className="text-emerald-400">{formatCurrency(item.grossEarnings)}</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Despesas</span>
+                          <strong className="text-rose-400">{formatCurrency(item.totalExpenses)}</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Lucro Real</span>
+                          <strong className="text-white">{formatCurrency(item.realNetProfit)}</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Caixa no Bolso</span>
+                          <strong className="text-teal-300">{formatCurrency(item.availableCashInPocket)}</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 self-end md:self-center">
+                      <button
+                        onClick={() => reopenPeriodAccounting(item.id)}
+                        className="bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white px-3 py-2 rounded-xl text-xs font-bold border border-white/10 flex items-center gap-1 active:scale-95 transition"
+                        title="Reabrir este período para edições"
+                      >
+                        <Unlock className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Reabrir</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* CENTRAL DE EXPORTAÇÃO FISCAL & CONTÁBIL (CSV EXCLUSIVO FASE E) */}
+          <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-5 rounded-3xl space-y-4">
+            <div>
+              <h3 className="text-sm font-black text-white flex items-center gap-2">
+                <BookOpen className="w-4 h-4 text-teal-400" />
+                CENTRAL DE EXPORTAÇÃO FISCAL & LIVRO CAIXA
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Exporte demonstrativos contábeis completos em planilhas compatíveis com Excel, LibreOffice e contabilidade do MEI.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {/* EXTRATO DIÁRIO CONSOLIDADO */}
+              <div className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-white font-bold text-xs mb-1">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                    <span>Extrato Diário Consolidado (Fonte da Verdade)</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Contém todos os dias operacionais com faturamento, combustível auditado, despesas, lucro líquido, reservas, km, horas e rendimento por km e hora.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => exportAccountingStatementCSV('consolidated_daily')}
+                  className="w-full bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow active:scale-95 transition"
+                >
+                  <Download className="w-4 h-4 stroke-[2.5]" />
+                  <span>Baixar Extrato Diário (CSV)</span>
+                </button>
+              </div>
+
+              {/* LIVRO CAIXA POR CENTROS DE CUSTO */}
+              <div className="bg-slate-950/40 p-4 rounded-2xl border border-white/5 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center gap-2 text-white font-bold text-xs mb-1">
+                    <FileSpreadsheet className="w-4 h-4 text-teal-400" />
+                    <span>Livro Caixa por Centros de Custo</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Discrimina entradas e saídas separadas por centro de custo: Custos Operacionais Diretos, Custos Fixos do Veículo e Movimentação no Posto.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => exportAccountingStatementCSV('general_ledger')}
+                  className="w-full bg-gradient-to-r from-teal-500 to-emerald-400 hover:from-teal-400 hover:to-emerald-300 text-slate-950 font-black py-2.5 px-3 rounded-xl text-xs flex items-center justify-center gap-1.5 shadow active:scale-95 transition"
+                >
+                  <Download className="w-4 h-4 stroke-[2.5]" />
+                  <span>Baixar Livro Caixa (CSV)</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -1,4 +1,6 @@
-import { ExpenseItem, Vehicle, WorkSession, EarningItem, FuelRecord, PlatformType, RideAnalysis } from '../types';
+import { ExpenseItem, Vehicle, WorkSession, EarningItem, FuelRecord, PlatformType, RideAnalysis, FuelCalculationMethod } from '../types';
+import { calculateRangeFinancialTruth } from './financialTruth';
+import { DEFAULT_TIMEZONE } from './timezone';
 
 /**
  * Trata divisão por zero de forma estritamente segura
@@ -178,7 +180,7 @@ export const calcShiftCostsFromKm = (
 };
 
 /**
- * Avaliador "Vale a Pena?"
+ * Avaliador "Vale a Pena?" (FASE F: Inteligência Multicritério e Decisão Operacional)
  */
 export const analyzeRide = (
   grossAmount: number,
@@ -187,34 +189,111 @@ export const analyzeRide = (
   vehicle: Vehicle,
   minRateKm: number,
   minRateHour: number,
-  gasPriceReference: number = 5.89
+  gasPriceReference: number = 5.89,
+  deadheadKm: number = 0
 ): RideAnalysis => {
+  const safeDistance = Math.max(0.1, distanceKm);
+  const totalDistanceWithDeadhead = safeDistance + Math.max(0, deadheadKm);
+  const deadheadRatio = totalDistanceWithDeadhead > 0 ? (deadheadKm / totalDistanceWithDeadhead) : 0;
+  
+  // Duração estimada considerando tempo de retorno proporcional
+  const estimatedDeadheadMinutes = deadheadKm > 0 ? Math.round((durationMinutes / safeDistance) * deadheadKm * 0.8) : 0;
+  const totalDurationMinutes = durationMinutes + estimatedDeadheadMinutes;
+  const totalDurationHours = safeDivide(totalDurationMinutes, 60);
   const durationHours = safeDivide(durationMinutes, 60);
-  const ratePerKm = safeDivide(grossAmount, distanceKm);
-  const ratePerHour = safeDivide(grossAmount, durationHours);
 
+  // Taxas brutas e efetivas
+  const ratePerKm = safeDivide(grossAmount, safeDistance);
+  const effectiveRatePerKm = safeDivide(grossAmount, totalDistanceWithDeadhead);
+  const ratePerHour = safeDivide(grossAmount, durationHours);
+  const effectiveRatePerHour = safeDivide(grossAmount, totalDurationHours);
+
+  // Custos calculados com a distância real total percorrida
   const fuelCostPerKm = safeDivide(gasPriceReference, vehicle.avgConsumption || 10);
-  const estimatedFuelCost = fuelCostPerKm * distanceKm;
+  const estimatedFuelCost = fuelCostPerKm * totalDistanceWithDeadhead;
   const depreciationPerKm = calcDepreciationPerKm(vehicle);
-  const estimatedDepreciationCost = depreciationPerKm * distanceKm;
+  const estimatedDepreciationCost = depreciationPerKm * totalDistanceWithDeadhead;
 
   const totalEstimatedCost = estimatedFuelCost + estimatedDepreciationCost;
   const estimatedNetProfit = grossAmount - totalEstimatedCost;
   const marginPercent = grossAmount > 0 ? (estimatedNetProfit / grossAmount) * 100 : 0;
+  const netPerHour = safeDivide(estimatedNetProfit, totalDurationHours);
+
+  // Cálculo de Score Multicritério de Atratividade (0 a 100)
+  // Critério 1: R$/KM vs Meta (peso 35%)
+  const kmRatio = minRateKm > 0 ? (effectiveRatePerKm / minRateKm) : 1;
+  const scoreKm = Math.min(40, Math.max(0, kmRatio * 35));
+
+  // Critério 2: R$/Hora vs Meta (peso 35%)
+  const hourRatio = minRateHour > 0 ? (effectiveRatePerHour / minRateHour) : 1;
+  const scoreHour = Math.min(40, Math.max(0, hourRatio * 35));
+
+  // Critério 3: Margem Líquida (peso 20%)
+  const scoreMargin = Math.min(20, Math.max(0, (marginPercent / 70) * 20));
+
+  // Critério 4: Penalidade de Retorno Vazio (até -15 pontos)
+  const deadheadPenalty = deadheadRatio * 15;
+
+  const rawScore = scoreKm + scoreHour + scoreMargin - deadheadPenalty;
+  const score = Math.min(100, Math.max(0, Math.round(rawScore)));
 
   let status: 'EXCELLENT' | 'FAIR' | 'BAD' = 'BAD';
   let recommendation = 'Rentabilidade abaixo dos seus parâmetros mínimos de corte.';
 
-  if (ratePerKm >= minRateKm && ratePerHour >= minRateHour) {
+  if (score >= 80 && effectiveRatePerKm >= minRateKm && effectiveRatePerHour >= minRateHour) {
     status = 'EXCELLENT';
-    recommendation = `Excelente corrida! Supera suas metas de corte (${formatCurrency(minRateKm)}/km e ${formatCurrency(minRateHour)}/h).`;
-  } else if (ratePerKm >= minRateKm * 0.85 || ratePerHour >= minRateHour * 0.85) {
+    recommendation = `Excelente corrida (Score ${score}/100)! Supera com folga suas metas de corte (${formatCurrency(minRateKm)}/km e ${formatCurrency(minRateHour)}/h).`;
+  } else if (score >= 60 || effectiveRatePerKm >= minRateKm * 0.85 || effectiveRatePerHour >= minRateHour * 0.85) {
     status = 'FAIR';
-    recommendation = `Corrida aceitável. Fica próxima do seu padrão ideal, avalie o destino e o trânsito da região.`;
+    if (deadheadKm > 0 && deadheadRatio > 0.3) {
+      recommendation = `Atenção ao retorno vazio (${deadheadKm.toFixed(1)} km). O ganho é aceitável, mas o deslocamento de volta reduz o lucro por KM para ${formatCurrency(effectiveRatePerKm)}/km.`;
+    } else {
+      recommendation = `Corrida aceitável (Score ${score}/100). Fica próxima do seu padrão ideal, avalie o destino e a probabilidade de novas chamadas na chegada.`;
+    }
   } else {
     status = 'BAD';
-    recommendation = `Não recomendada pelos seus parâmetros configurados (${formatCurrency(minRateKm)}/km e ${formatCurrency(minRateHour)}/h).`;
+    if (deadheadKm > 0 && effectiveRatePerKm < minRateKm * 0.7) {
+      recommendation = `Inviável com retorno vazio: O ganho real cai para ${formatCurrency(effectiveRatePerKm)}/km, muito abaixo do corte de ${formatCurrency(minRateKm)}/km.`;
+    } else {
+      recommendation = `Não recomendada (Score ${score}/100): Abaixo dos parâmetros configurados (${formatCurrency(minRateKm)}/km e ${formatCurrency(minRateHour)}/h).`;
+    }
   }
+
+  // Simulação Comparativa por Plataforma
+  const platformEstimates: RideAnalysis['platformEstimates'] = {
+    Uber: {
+      gross: grossAmount,
+      platformFeePercent: 24.5,
+      platformFeeAmount: grossAmount * 0.245,
+      netProfit: grossAmount * 0.755 - totalEstimatedCost,
+      hourlyNet: safeDivide(grossAmount * 0.755 - totalEstimatedCost, totalDurationHours),
+      highlight: 'Maior liquidez e volume de chamadas imediatas',
+    },
+    '99': {
+      gross: grossAmount,
+      platformFeePercent: 19.9,
+      platformFeeAmount: grossAmount * 0.199,
+      netProfit: grossAmount * 0.801 - totalEstimatedCost,
+      hourlyNet: safeDivide(grossAmount * 0.801 - totalEstimatedCost, totalDurationHours),
+      highlight: 'Melhor repasse percentual em corridas médias',
+    },
+    inDrive: {
+      gross: grossAmount,
+      platformFeePercent: 10.5,
+      platformFeeAmount: grossAmount * 0.105,
+      netProfit: grossAmount * 0.895 - totalEstimatedCost,
+      hourlyNet: safeDivide(grossAmount * 0.895 - totalEstimatedCost, totalDurationHours),
+      highlight: 'Taxa reduzida (apenas 10,5% de comissão)',
+    },
+    Particular: {
+      gross: grossAmount,
+      platformFeePercent: 0,
+      platformFeeAmount: 0,
+      netProfit: grossAmount - totalEstimatedCost,
+      hourlyNet: safeDivide(grossAmount - totalEstimatedCost, totalDurationHours),
+      highlight: '100% de repasse líquido direto ao motorista',
+    },
+  };
 
   return {
     ratePerKm,
@@ -226,6 +305,13 @@ export const analyzeRide = (
     marginPercent,
     status,
     recommendation,
+    score,
+    deadheadKm,
+    totalDistanceWithDeadhead,
+    effectiveRatePerKm,
+    effectiveRatePerHour,
+    netPerHour,
+    platformEstimates,
   };
 };
 
@@ -288,9 +374,16 @@ export const calcPlatformBreakdown = (earnings: EarningItem[]) => {
 };
 
 /**
- * Comparativo Mês Atual vs Mês Anterior
+ * Comparativo Mês Atual vs Mês Anterior (FASE E - Fonte Única da Verdade)
  */
-export const calcMonthlyComparison = (sessions: WorkSession[], expenses: ExpenseItem[]) => {
+export const calcMonthlyComparison = (
+  sessions: WorkSession[],
+  expenses: ExpenseItem[],
+  fuelRecords: FuelRecord[] = [],
+  earnings: EarningItem[] = [],
+  fuelMethod: FuelCalculationMethod = 'hibrido',
+  timezone: string = DEFAULT_TIMEZONE
+) => {
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
@@ -299,36 +392,55 @@ export const calcMonthlyComparison = (sessions: WorkSession[], expenses: Expense
   const prevYear = prevMonthDate.getFullYear();
   const prevMonth = prevMonthDate.getMonth();
 
-  const isCurrentMonth = (dateStr: string) => {
-    const d = new Date(dateStr);
-    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-  };
+  const daysInCurMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+  const curDates: string[] = [];
+  for (let d = 1; d <= daysInCurMonth; d++) {
+    curDates.push(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
 
-  const isPrevMonth = (dateStr: string) => {
-    const d = new Date(dateStr);
-    return d.getFullYear() === prevYear && d.getMonth() === prevMonth;
-  };
+  const daysInPrevMonth = new Date(prevYear, prevMonth + 1, 0).getDate();
+  const prevDates: string[] = [];
+  for (let d = 1; d <= daysInPrevMonth; d++) {
+    prevDates.push(`${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+  }
 
-  const currentSessions = sessions.filter(s => isCurrentMonth(s.startTime));
-  const prevSessions = sessions.filter(s => isPrevMonth(s.startTime));
+  const curTruth = calculateRangeFinancialTruth(
+    curDates,
+    sessions,
+    expenses,
+    fuelRecords,
+    earnings,
+    fuelMethod,
+    timezone
+  );
 
-  const currentGross = currentSessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
-  const prevGross = prevSessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
+  const prevTruth = calculateRangeFinancialTruth(
+    prevDates,
+    sessions,
+    expenses,
+    fuelRecords,
+    earnings,
+    fuelMethod,
+    timezone
+  );
 
-  const currentFuel = currentSessions.reduce((acc, s) => acc + s.fuelExpenses, 0);
-  const currentOtherExp = currentSessions.reduce((acc, s) => acc + s.otherExpenses, 0);
-  const currentExpensesDirect = currentFuel + currentOtherExp;
+  const currentGross = curTruth.grossTotal;
+  const prevGross = prevTruth.grossTotal;
 
-  const prevFuel = prevSessions.reduce((acc, s) => acc + s.fuelExpenses, 0);
-  const prevOtherExp = prevSessions.reduce((acc, s) => acc + s.otherExpenses, 0);
-  const prevExpensesDirect = prevFuel + prevOtherExp;
+  const currentExpensesDirect = curTruth.expensesTotal;
+  const prevExpensesDirect = prevTruth.expensesTotal;
 
-  const currentNet = currentGross - currentExpensesDirect;
-  const prevNet = prevGross - prevExpensesDirect;
+  const currentNet = curTruth.netProfitTotal;
+  const prevNet = prevTruth.netProfitTotal;
 
   const grossChange = prevGross > 0 ? ((currentGross - prevGross) / prevGross) * 100 : 0;
   const expensesChange = prevExpensesDirect > 0 ? ((currentExpensesDirect - prevExpensesDirect) / prevExpensesDirect) * 100 : 0;
   const netChange = prevNet > 0 ? ((currentNet - prevNet) / prevNet) * 100 : 0;
+
+  const currentSessions = sessions.filter(s => {
+    const d = new Date(s.startTime);
+    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
+  });
 
   return {
     currentGross,
@@ -341,7 +453,11 @@ export const calcMonthlyComparison = (sessions: WorkSession[], expenses: Expense
     prevNet,
     netChange,
     currentSessionsCount: currentSessions.length,
-    currentTripsCount: currentSessions.reduce((acc, s) => acc + s.tripsCount, 0),
+    currentTripsCount: curTruth.tripsTotal,
+    currentKm: curTruth.distanceKmTotal,
+    currentHours: curTruth.durationHoursTotal,
+    availableCash: curTruth.availableCashTotal,
+    reservesTotal: curTruth.reservesTotal,
   };
 };
 
@@ -758,4 +874,89 @@ export const previewRecalculateSessions = (
     items,
   };
 };
+
+/**
+ * Cálculo inteligente de Litros no Tanque do Sandero a partir de:
+ * 1. Número de Barras LCD do Painel (0 a 8 barras)
+ * 2. Autonomia exibida no Computador de Bordo (KM)
+ * 3. Consumo Médio configurado (km/L) e Capacidade do Tanque (L)
+ */
+export interface SanderoTankCalculationResult {
+  litersFromBars: number;
+  litersFromAutonomy: number;
+  recommendedLiters: number;
+  autonomyEstimatedFromBars: number;
+  impliedConsumption: number;
+  barsPercentage: number;
+  isReserve: boolean;
+  explanation: string;
+}
+
+export const calcSanderoLitersFromBarsAndAutonomy = (params: {
+  bars: number;
+  autonomyKm?: number;
+  tankCapacity?: number;
+  avgConsumption?: number;
+  totalBars?: number;
+}): SanderoTankCalculationResult => {
+  const {
+    bars = 0,
+    autonomyKm = 0,
+    tankCapacity = 50,
+    avgConsumption = 12.5,
+    totalBars = 8,
+  } = params;
+
+  // Litros baseados na proporção de barras (cada barra em 50L = 6.25L)
+  const clampedBars = Math.max(0, Math.min(totalBars, bars));
+  const litersFromBars = Number(((clampedBars / totalBars) * tankCapacity).toFixed(1));
+  const barsPercentage = Math.round((clampedBars / totalBars) * 100);
+
+  // Litros baseados na autonomia informada
+  const validAutonomy = Math.max(0, autonomyKm);
+  const litersFromAutonomy = validAutonomy > 0 && avgConsumption > 0
+    ? Number((validAutonomy / avgConsumption).toFixed(1))
+    : 0;
+
+  // Autonomia estimada a partir das barras
+  const autonomyEstimatedFromBars = Math.round(litersFromBars * avgConsumption);
+
+  // Consumo inferido se ambos foram informados
+  let impliedConsumption = avgConsumption;
+  if (litersFromBars > 0 && validAutonomy > 0) {
+    impliedConsumption = Number(safeDivide(validAutonomy, litersFromBars).toFixed(1));
+  }
+
+  // Litros recomendados finais (se informou autonomia, usamos com precisão refinada; se não, usamos barras)
+  let recommendedLiters = litersFromBars;
+  let explanation = '';
+
+  if (validAutonomy > 0 && litersFromBars > 0) {
+    // Quando ambos são informados, a autonomia do computador de bordo oferece resolução contínua (ex: 284 km = 22.7L)
+    // enquanto as barras dão o intervalo (ex: 4 barras = 25L).
+    // Se a autonomia estiver dentro da faixa da barra +/- 1 barra, adotamos a autonomia refinada!
+    const autonomyLitersClamped = Math.max(0, Math.min(tankCapacity, litersFromAutonomy));
+    recommendedLiters = autonomyLitersClamped;
+    explanation = `${clampedBars}/8 barras com ${validAutonomy} km de autonomia no computador de bordo equivalem a ~${recommendedLiters.toFixed(1)} L no tanque (média inferida: ${impliedConsumption} km/L).`;
+  } else if (validAutonomy > 0) {
+    recommendedLiters = Math.min(tankCapacity, litersFromAutonomy);
+    explanation = `Autonomia de ${validAutonomy} km com consumo de ${avgConsumption.toFixed(1)} km/L indica ~${recommendedLiters.toFixed(1)} L no tanque.`;
+  } else {
+    explanation = `${clampedBars} de ${totalBars} barras (${barsPercentage}%) equivalem a exatamente ~${litersFromBars.toFixed(1)} L no tanque de ${tankCapacity}L.`;
+  }
+
+  const isReserve = recommendedLiters <= 6.5 || clampedBars <= 1;
+
+  return {
+    litersFromBars,
+    litersFromAutonomy,
+    recommendedLiters: Number(recommendedLiters.toFixed(1)),
+    autonomyEstimatedFromBars,
+    impliedConsumption,
+    barsPercentage,
+    isReserve,
+    explanation,
+  };
+};
+
 

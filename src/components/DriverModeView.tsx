@@ -26,7 +26,12 @@ import {
   ArrowLeft,
   Sparkles,
   Zap,
+  Calculator,
+  Compass,
+  Gauge,
+  PlusCircle,
 } from 'lucide-react';
+import { analyzeRide } from '../utils/calc';
 
 interface DriverModeViewProps {
   onExitDriverMode: () => void;
@@ -71,6 +76,11 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
   } = useDriverVoice();
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [showQuickRideModal, setShowQuickRideModal] = useState(false);
+  const [hudGross, setHudGross] = useState('35.00');
+  const [hudDistance, setHudDistance] = useState('12.0');
+  const [hudDuration, setHudDuration] = useState('20');
+  const [hudDeadhead, setHudDeadhead] = useState('2.0');
 
   // Timer do expediente ativo
   useEffect(() => {
@@ -400,6 +410,19 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
             <p className="text-[10px] text-slate-400 mt-1">Relatório falado</p>
           </button>
 
+          {/* ANALISAR CORRIDA EM 3s (FASE F) */}
+          <button
+            type="button"
+            onClick={() => setShowQuickRideModal(true)}
+            className="bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 p-3 rounded-2xl text-left transition"
+          >
+            <div className="flex items-center gap-1.5 text-emerald-300 font-black text-xs">
+              <Calculator className="w-3.5 h-3.5" />
+              Analisar Corrida
+            </div>
+            <p className="text-[10px] text-slate-400 mt-1">Score & Retorno Vazio</p>
+          </button>
+
           {/* ABASTECER */}
           <button
             type="button"
@@ -414,6 +437,155 @@ export const DriverModeView: React.FC<DriverModeViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* MODAL HUD: ANALISADOR EXPRESSO DE CORRIDA (FASE F) */}
+      {showQuickRideModal && (() => {
+        const parsedG = parseFloat(hudGross) || 0;
+        const parsedD = parseFloat(hudDistance) || 0.1;
+        const parsedT = parseFloat(hudDuration) || 1;
+        const parsedDh = parseFloat(hudDeadhead) || 0;
+        const quickAnalysis = analyzeRide(
+          parsedG,
+          parsedD,
+          parsedT,
+          vehicle,
+          profile.minAcceptableRateKm,
+          profile.minAcceptableRateHour,
+          profile.gasPriceReference,
+          parsedDh
+        );
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 max-w-md w-full space-y-4 shadow-2xl animate-fadeIn">
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <Calculator className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-sm font-black text-white uppercase tracking-wider">
+                    Análise Rápida de Corrida
+                  </h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickRideModal(false)}
+                  className="p-1.5 rounded-xl bg-white/10 text-slate-400 hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* INPUTS GIGANTES */}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Valor (R$)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={hudGross}
+                    onChange={e => setHudGross(e.target.value)}
+                    className="w-full bg-black/50 border border-white/20 rounded-xl px-3 py-2 text-lg font-black text-emerald-400"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Distância (KM)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={hudDistance}
+                    onChange={e => setHudDistance(e.target.value)}
+                    className="w-full bg-black/50 border border-white/20 rounded-xl px-3 py-2 text-lg font-black text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-slate-400 uppercase">Tempo (min)</label>
+                  <input
+                    type="number"
+                    value={hudDuration}
+                    onChange={e => setHudDuration(e.target.value)}
+                    className="w-full bg-black/50 border border-white/20 rounded-xl px-3 py-2 text-lg font-black text-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-amber-400 uppercase">Volta Vazia (KM)</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    value={hudDeadhead}
+                    onChange={e => setHudDeadhead(e.target.value)}
+                    className="w-full bg-black/50 border border-amber-500/30 rounded-xl px-3 py-2 text-lg font-black text-amber-300"
+                  />
+                </div>
+              </div>
+
+              {/* VEREDITO */}
+              <div className={`p-4 rounded-2xl border ${
+                quickAnalysis.status === 'EXCELLENT'
+                  ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                  : quickAnalysis.status === 'FAIR'
+                  ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                  : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-black">{quickAnalysis.score ?? 0}</span>
+                    <div>
+                      <span className="text-[9px] uppercase font-bold tracking-wider block opacity-80">SCORE CORRIDA</span>
+                      <strong className="text-xs uppercase">
+                        {quickAnalysis.status === 'EXCELLENT' ? '🟢 ACEITAR' : quickAnalysis.status === 'FAIR' ? '🟡 AVALIAR' : '🔴 RECUSAR'}
+                      </strong>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[9px] uppercase font-bold text-slate-300 block">Líquido</span>
+                    <span className="text-base font-black text-white">{formatCurrency(quickAnalysis.estimatedNetProfit)}</span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 mt-2 pt-2 border-t border-white/10 text-center text-xs">
+                  <div>
+                    <span className="text-[9px] text-slate-400 block uppercase">R$/KM Real</span>
+                    <strong className="text-white">{formatCurrency(quickAnalysis.effectiveRatePerKm ?? quickAnalysis.ratePerKm)}/km</strong>
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 block uppercase">R$/Hora Real</span>
+                    <strong className="text-white">{formatCurrency(quickAnalysis.effectiveRatePerHour ?? quickAnalysis.ratePerHour)}/h</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* BOTÕES DE AÇÃO */}
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowQuickRideModal(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 font-bold text-xs"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (parsedG > 0) {
+                      addEarning({
+                        amount: parsedG,
+                        platform: 'Uber',
+                        trips: 1,
+                        date: todayStr,
+                        time: new Date().toTimeString().slice(0, 5),
+                        notes: `Corrida rápida HUD: ${parsedD}km (Score ${quickAnalysis.score})`,
+                      });
+                      setShowQuickRideModal(false);
+                    }
+                  }}
+                  className="flex-1 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs shadow-lg shadow-emerald-500/20"
+                >
+                  Lançar Ganho (+{formatCurrency(parsedG)})
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 5. RODAPÉ: AVISO OBRIGATÓRIO DE SEGURANÇA NO TRÂNSITO (ITEM 49) */}
       <div className="border-t border-white/10 pt-3 flex items-center justify-between text-xs text-slate-400 shrink-0 gap-2">

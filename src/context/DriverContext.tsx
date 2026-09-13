@@ -15,9 +15,25 @@ import {
   DriverStrategy,
   DashboardCardConfig,
   DashboardCardId,
+  FuelCalculationMethod,
+  AccountingClosing,
 } from '../types';
 import { defaultStrategyPresets } from '../data/defaultStrategies';
 import { DEFAULT_DASHBOARD_CARDS } from '../data/defaultDashboardCards';
+import {
+  generateDriverBackup,
+  downloadBackupFile,
+  saveLocalSnapshot,
+  getLocalSnapshot,
+  DriverPlannerBackupPayload,
+} from '../utils/backup';
+import {
+  calculateDayFinancialTruth,
+  auditAndReconcilePlannerEvents,
+  getCostCenterForCategory,
+  DayFinancialSummary,
+} from '../utils/financialTruth';
+import { getOperationalDate, DEFAULT_TIMEZONE } from '../utils/timezone';
 import {
   RecalculationOptions,
   RecalculationSummary,
@@ -124,6 +140,10 @@ interface DriverContextType {
   applyRecurringScheduleToRange: (startDateStr: string, daysCount: number) => void;
   duplicateScheduleToWeek: (sourceWeekStartDate: string, targetWeekStartDate: string) => void;
   syncAllLaunchesToPlanner: () => void;
+  reconcilePlannerData: () => { count: number; divergences: any[] };
+  getDayFinancialTruth: (dateStr: string) => DayFinancialSummary;
+  fuelCalculationMethod: FuelCalculationMethod;
+  setFuelCalculationMethod: (method: FuelCalculationMethod) => void;
   
   // Transactions
   addEarning: (earning: Omit<EarningItem, 'id' | 'timestamp'> & { timestamp?: string; date?: string }) => void;
@@ -140,12 +160,21 @@ interface DriverContextType {
   markAlertRead: (id: string) => void;
   clearAlerts: () => void;
   
-  // Data management
+  // Data management & Backup
   loadDemoData: () => void;
   clearAllData: () => void;
   exportDataJSON: () => void;
   exportDataCSV: () => void;
   importDataJSON: (jsonString: string) => boolean;
+  createPreMigrationBackup: (autoSaveLocal?: boolean) => Promise<DriverPlannerBackupPayload>;
+  downloadFullBackup: () => Promise<{ success: boolean; filename: string; sizeBytes: number; totalRecords: number }>;
+  getLocalSnapshotData: () => DriverPlannerBackupPayload | null;
+
+  // Fechamento Contábil e Auditoria de Exercício (FASE E)
+  accountingClosings: AccountingClosing[];
+  closePeriodAccounting: (params: Omit<AccountingClosing, 'id' | 'closedAt' | 'closingHash' | 'status'>) => AccountingClosing;
+  reopenPeriodAccounting: (id: string) => void;
+  exportAccountingStatementCSV: (type: 'consolidated_daily' | 'general_ledger') => void;
 }
 
 const defaultProfile: UserProfile = {
@@ -278,6 +307,20 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     return [];
   });
 
+  // Fechamento Contábil e Auditoria de Exercício (FASE E)
+  const [accountingClosings, setAccountingClosings] = useState<AccountingClosing[]>(() => {
+    const saved = localStorage.getItem('@driver_accounting_closings_v2');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {
+        console.error('Erro ao ler fechamentos contábeis salvos:', e);
+      }
+    }
+    return [];
+  });
+
   // Lista consolidada de categorias de despesa (padrão + personalizadas pelo motorista)
   const expenseCategories = useMemo(() => {
     const list = [...DEFAULT_EXPENSE_CATEGORIES, ...customExpenseCategories];
@@ -387,7 +430,8 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.setItem('@driver_custom_expense_cats_v2', JSON.stringify(customExpenseCategories));
     localStorage.setItem('@driver_is_demo_v2', String(isDemoData));
     localStorage.setItem('@driver_dashboard_cards_v1', JSON.stringify(dashboardCards));
-  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, customExpenseCategories, isDemoData, dashboardCards]);
+    localStorage.setItem('@driver_accounting_closings_v2', JSON.stringify(accountingClosings));
+  }, [profile, vehicle, sessions, plannerEvents, recurringSchedule, earnings, expenses, fuelRecords, maintenances, alerts, strategies, customExpenseCategories, isDemoData, dashboardCards, accountingClosings]);
 
   // Checagem proativa de alertas
   useEffect(() => {
@@ -494,47 +538,69 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       maintenanceReserve: calculatedMaintReserve,
       platformEarnings,
       notes,
+      operationalDate: activeSession.operationalDate || getOperationalDate(activeSession.startTime, profile.timezone || DEFAULT_TIMEZONE),
+      timezone: profile.timezone || DEFAULT_TIMEZONE,
     };
-    setSessions(prev => prev.map(s => (s.id === activeSession.id ? finished : s)));
-    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, safeEndKm) }));
 
-    // Atualiza ou cria evento do planner do dia
-    // Apenas as despesas diretas desembolsadas entram em realizedExpenses; o combustível gasto entra em realizedReserves
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    const opDate = finished.operationalDate!;
     const todayStr = activeSession.startTime.split('T')[0];
-    setPlannerEvents(prev => {
-      const existing = prev.find(p => p.date === todayStr);
-      if (existing) {
-        return prev.map(p =>
-          p.date === todayStr
-            ? {
-                ...p,
-                realizedGross: (p.realizedGross || 0) + gross + tips,
-                realizedExpenses: (p.realizedExpenses || 0) + (fuelExp || 0) + (otherExp || 0),
-                realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
-                realizedTrips: (p.realizedTrips || 0) + trips,
-              }
-            : p
-        );
-      } else {
-        return [
-          ...prev,
-          {
-            id: 'ev-shift-' + todayStr + '-' + Date.now(),
-            date: todayStr,
-            type: 'work' as PlannerEventType,
-            startTime: activeSession.startTime.slice(11, 16),
-            endTime: new Date().toISOString().slice(11, 16),
-            targetEarnings: profile.dailyGoal || 250,
-            platforms: platformEarnings ? (Object.keys(platformEarnings) as PlatformType[]) : ['Uber', '99'],
-            notes: notes || 'Turno finalizado e sincronizado',
-            realizedGross: gross + tips,
-            realizedExpenses: (fuelExp || 0) + (otherExp || 0),
-            realizedReserves: calculatedFuelReserve + calculatedMaintReserve,
-            realizedTrips: trips,
-          },
-        ];
-      }
+
+    setSessions(prev => {
+      const updated = prev.map(s => (s.id === activeSession.id ? finished : s));
+      const truth = calculateDayFinancialTruth(
+        opDate,
+        updated,
+        expenses,
+        fuelRecords,
+        earnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+
+      setPlannerEvents(eventsPrev => {
+        const existing = eventsPrev.find(p => (p.operationalDate || p.date) === opDate);
+        if (existing) {
+          return eventsPrev.map(p =>
+            (p.operationalDate || p.date) === opDate
+              ? {
+                  ...p,
+                  sessionId: finished.id,
+                  realizedGross: truth.grossEarnings,
+                  realizedExpenses: truth.totalExpenses,
+                  realizedReserves: truth.reserves,
+                  realizedNetProfit: truth.availableCash,
+                  realizedTrips: truth.tripsCount,
+                }
+              : p
+          );
+        } else {
+          return [
+            ...eventsPrev,
+            {
+              id: 'ev-shift-' + todayStr + '-' + Date.now(),
+              date: todayStr,
+              operationalDate: opDate,
+              sessionId: finished.id,
+              type: 'work' as PlannerEventType,
+              startTime: activeSession.startTime.slice(11, 16),
+              endTime: new Date().toISOString().slice(11, 16),
+              targetEarnings: profile.dailyGoal || 250,
+              platforms: platformEarnings ? (Object.keys(platformEarnings) as PlatformType[]) : ['Uber', '99'],
+              notes: notes || 'Turno finalizado e sincronizado',
+              realizedGross: truth.grossEarnings,
+              realizedExpenses: truth.totalExpenses,
+              realizedReserves: truth.reserves,
+              realizedNetProfit: truth.availableCash,
+              realizedTrips: truth.tripsCount,
+            },
+          ];
+        }
+      });
+
+      return updated;
     });
+    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, safeEndKm) }));
   };
 
   const addCompletedShift = (data: {
@@ -552,6 +618,7 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     notes?: string;
     platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
   }) => {
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
     const kmDriven = Math.max(0, data.endOdometer - data.startOdometer);
     const calculatedFuelReserve = data.fuelReserve !== undefined
       ? data.fuelReserve
@@ -561,9 +628,12 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       ? data.maintenanceReserve
       : Math.round((kmDriven * maintenanceRate) * 100) / 100;
 
+    const rawStartTime = data.startTime || new Date(Date.now() - 6 * 3600000).toISOString();
+    const opDate = getOperationalDate(rawStartTime, timezone);
+
     const newSession: WorkSession = {
       id: 'ses-' + Date.now(),
-      startTime: data.startTime || new Date(Date.now() - 6 * 3600000).toISOString(),
+      startTime: rawStartTime,
       endTime: data.endTime || new Date().toISOString(),
       startOdometer: data.startOdometer,
       endOdometer: data.endOdometer,
@@ -577,46 +647,66 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       maintenanceReserve: calculatedMaintReserve,
       platformEarnings: data.platformEarnings,
       notes: data.notes,
+      operationalDate: opDate,
+      timezone,
     };
 
-    setSessions(prev => [newSession, ...prev]);
-    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, data.endOdometer) }));
+    setSessions(prev => {
+      const updated = [newSession, ...prev];
+      const truth = calculateDayFinancialTruth(
+        opDate,
+        updated,
+        expenses,
+        fuelRecords,
+        earnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
 
-    const sessionDate = newSession.startTime.split('T')[0];
-    setPlannerEvents(prev => {
-      const existing = prev.find(p => p.date === sessionDate);
-      if (existing) {
-        return prev.map(p =>
-          p.date === sessionDate
-            ? {
-                ...p,
-                realizedGross: (p.realizedGross || 0) + data.grossEarnings + (data.tips || 0),
-                realizedExpenses: (p.realizedExpenses || 0) + (newSession.fuelExpenses + (data.otherExpenses || 0)),
-                realizedReserves: (p.realizedReserves || 0) + calculatedFuelReserve + calculatedMaintReserve,
-                realizedTrips: (p.realizedTrips || 0) + (data.tripsCount || 1),
-              }
-            : p
-        );
-      } else {
-        return [
-          ...prev,
-          {
-            id: 'ev-shift-' + sessionDate + '-' + Date.now(),
-            date: sessionDate,
-            type: 'work' as PlannerEventType,
-            startTime: newSession.startTime.slice(11, 16),
-            endTime: newSession.endTime ? newSession.endTime.slice(11, 16) : '18:00',
-            targetEarnings: profile.dailyGoal || 250,
-            platforms: data.platformEarnings ? (Object.keys(data.platformEarnings) as PlatformType[]) : ['Uber', '99'],
-            notes: data.notes || 'Turno finalizado e sincronizado',
-            realizedGross: data.grossEarnings + (data.tips || 0),
-            realizedExpenses: newSession.fuelExpenses + (data.otherExpenses || 0),
-            realizedReserves: calculatedFuelReserve + calculatedMaintReserve,
-            realizedTrips: data.tripsCount || 1,
-          },
-        ];
-      }
+      const sessionDate = newSession.startTime.split('T')[0];
+      setPlannerEvents(eventsPrev => {
+        const existing = eventsPrev.find(p => (p.operationalDate || p.date) === opDate);
+        if (existing) {
+          return eventsPrev.map(p =>
+            (p.operationalDate || p.date) === opDate
+              ? {
+                  ...p,
+                  sessionId: newSession.id,
+                  realizedGross: truth.grossEarnings,
+                  realizedExpenses: truth.totalExpenses,
+                  realizedReserves: truth.reserves,
+                  realizedNetProfit: truth.availableCash,
+                  realizedTrips: truth.tripsCount,
+                }
+              : p
+          );
+        } else {
+          return [
+            ...eventsPrev,
+            {
+              id: 'ev-shift-' + sessionDate + '-' + Date.now(),
+              date: sessionDate,
+              operationalDate: opDate,
+              sessionId: newSession.id,
+              type: 'work' as PlannerEventType,
+              startTime: newSession.startTime.slice(11, 16),
+              endTime: newSession.endTime ? newSession.endTime.slice(11, 16) : '18:00',
+              targetEarnings: profile.dailyGoal || 250,
+              platforms: data.platformEarnings ? (Object.keys(data.platformEarnings) as PlatformType[]) : ['Uber', '99'],
+              notes: data.notes || 'Turno finalizado e sincronizado',
+              realizedGross: truth.grossEarnings,
+              realizedExpenses: truth.totalExpenses,
+              realizedReserves: truth.reserves,
+              realizedNetProfit: truth.availableCash,
+              realizedTrips: truth.tripsCount,
+            },
+          ];
+        }
+      });
+
+      return updated;
     });
+    setVehicle(v => ({ ...v, currentOdometer: Math.max(v.currentOdometer, data.endOdometer) }));
   };
 
   const cancelShift = () => {
@@ -870,18 +960,20 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const addEarning = (earning: Omit<EarningItem, 'id' | 'timestamp'> & { timestamp?: string; date?: string }) => {
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
     const timestamp = earning.timestamp 
       ? earning.timestamp 
       : earning.date 
       ? `${earning.date}T${new Date().toISOString().slice(11)}` 
       : new Date().toISOString();
+    const opDate = earning.operationalDate || getOperationalDate(timestamp, timezone);
 
     const item: EarningItem = {
       ...earning,
       id: 'earn-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       timestamp,
+      operationalDate: opDate,
     };
-    setEarnings(prev => [item, ...prev]);
 
     if (activeSession) {
       setSessions(prev =>
@@ -898,70 +990,114 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       );
     }
 
-    // Sincronizar com o Planner para a data do lançamento
-    const earningDate = timestamp.split('T')[0];
-    setPlannerEvents(prev => {
-      const existing = prev.find(p => p.date === earningDate);
-      if (existing) {
-        return prev.map(p =>
-          p.date === earningDate
-            ? {
-                ...p,
-                realizedGross: (p.realizedGross || 0) + item.amount + (item.tip || 0),
-                realizedTrips: (p.realizedTrips || 0) + (item.tripsCount || 1),
-                platforms: existing.platforms.includes(item.platform)
-                  ? existing.platforms
-                  : [...existing.platforms, item.platform],
-              }
-            : p
-        );
-      } else {
-        const newEvent: PlannerEvent = {
-          id: 'ev-auto-' + earningDate + '-' + Date.now(),
-          date: earningDate,
-          type: 'work' as PlannerEventType,
-          startTime: '06:00',
-          endTime: '14:00',
-          targetEarnings: profile.dailyGoal || 250,
-          platforms: [item.platform],
-          notes: 'Dia sincronizado com lançamentos de receitas',
-          realizedGross: item.amount + (item.tip || 0),
-          realizedExpenses: 0,
-          realizedReserves: 0,
-          realizedTrips: item.tripsCount || 1,
-        };
-        return [...prev, newEvent];
-      }
+    setEarnings(prev => {
+      const updatedEarnings = [item, ...prev];
+      const truth = calculateDayFinancialTruth(
+        opDate,
+        sessions,
+        expenses,
+        fuelRecords,
+        updatedEarnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+
+      const earningDate = timestamp.split('T')[0];
+      setPlannerEvents(eventsPrev => {
+        const existing = eventsPrev.find(p => (p.operationalDate || p.date) === opDate);
+        if (existing) {
+          return eventsPrev.map(p =>
+            (p.operationalDate || p.date) === opDate
+              ? {
+                  ...p,
+                  realizedGross: truth.grossEarnings,
+                  realizedExpenses: truth.totalExpenses,
+                  realizedReserves: truth.reserves,
+                  realizedNetProfit: truth.availableCash,
+                  realizedTrips: truth.tripsCount,
+                  platforms: existing.platforms.includes(item.platform)
+                    ? existing.platforms
+                    : [...existing.platforms, item.platform],
+                }
+              : p
+          );
+        } else {
+          return [
+            ...eventsPrev,
+            {
+              id: 'ev-auto-' + earningDate + '-' + Date.now(),
+              date: earningDate,
+              operationalDate: opDate,
+              type: 'work' as PlannerEventType,
+              startTime: '06:00',
+              endTime: '14:00',
+              targetEarnings: profile.dailyGoal || 250,
+              platforms: [item.platform],
+              notes: 'Dia sincronizado com lançamentos de receitas',
+              realizedGross: truth.grossEarnings,
+              realizedExpenses: truth.totalExpenses,
+              realizedReserves: truth.reserves,
+              realizedNetProfit: truth.availableCash,
+              realizedTrips: truth.tripsCount,
+            },
+          ];
+        }
+      });
+
+      return updatedEarnings;
     });
   };
 
   const deleteEarning = (id: string) => {
     const itemToDelete = earnings.find(e => e.id === id);
-    setEarnings(prev => prev.filter(e => e.id !== id));
-    if (itemToDelete && itemToDelete.timestamp) {
-      const earningDate = itemToDelete.timestamp.split('T')[0];
-      setPlannerEvents(prev =>
-        prev.map(p =>
-          p.date === earningDate
+    if (!itemToDelete) return;
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    const opDate = itemToDelete.operationalDate || getOperationalDate(itemToDelete.timestamp, timezone);
+
+    setEarnings(prev => {
+      const updatedEarnings = prev.filter(e => e.id !== id);
+      const truth = calculateDayFinancialTruth(
+        opDate,
+        sessions,
+        expenses,
+        fuelRecords,
+        updatedEarnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+
+      setPlannerEvents(eventsPrev =>
+        eventsPrev.map(p =>
+          (p.operationalDate || p.date) === opDate
             ? {
                 ...p,
-                realizedGross: Math.max(0, (p.realizedGross || 0) - itemToDelete.amount - (itemToDelete.tip || 0)),
-                realizedTrips: Math.max(0, (p.realizedTrips || 0) - (itemToDelete.tripsCount || 1)),
+                realizedGross: truth.grossEarnings,
+                realizedExpenses: truth.totalExpenses,
+                realizedReserves: truth.reserves,
+                realizedNetProfit: truth.availableCash,
+                realizedTrips: truth.tripsCount,
               }
             : p
         )
       );
-    }
+
+      return updatedEarnings;
+    });
   };
 
   const addExpense = (exp: Omit<ExpenseItem, 'id'> & { date?: string }) => {
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
     const expDate = exp.date || new Date().toISOString().split('T')[0];
+    const opDate = exp.operationalDate || getOperationalDate(expDate, timezone);
+    const costType = exp.costType || getCostCenterForCategory(exp.category);
+
     const item: ExpenseItem = {
       ...exp,
       id: 'exp-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
       date: expDate,
+      operationalDate: opDate,
+      costType,
     };
-    setExpenses(prev => [item, ...prev]);
 
     if (activeSession && exp.sessionId === activeSession.id) {
       setSessions(prev =>
@@ -976,138 +1112,165 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       );
     }
 
-    // Sincronizar com o Planner para a data da despesa
-    setPlannerEvents(prev => {
-      const existing = prev.find(p => p.date === expDate);
-      if (existing) {
-        return prev.map(p =>
-          p.date === expDate
-            ? {
-                ...p,
-                realizedExpenses: (p.realizedExpenses || 0) + item.amount,
-              }
-            : p
-        );
-      } else {
-        const newEvent: PlannerEvent = {
-          id: 'ev-auto-' + expDate + '-' + Date.now(),
-          date: expDate,
-          type: 'work' as PlannerEventType,
-          startTime: '06:00',
-          endTime: '14:00',
-          targetEarnings: profile.dailyGoal || 250,
-          platforms: ['Uber'],
-          notes: 'Dia sincronizado com lançamentos de despesas',
-          realizedGross: 0,
-          realizedExpenses: item.amount,
-          realizedReserves: 0,
-          realizedTrips: 0,
-        };
-        return [...prev, newEvent];
-      }
+    setExpenses(prev => {
+      const updatedExpenses = [item, ...prev];
+      const truth = calculateDayFinancialTruth(
+        opDate,
+        sessions,
+        updatedExpenses,
+        fuelRecords,
+        earnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+
+      setPlannerEvents(eventsPrev => {
+        const existing = eventsPrev.find(p => (p.operationalDate || p.date) === opDate);
+        if (existing) {
+          return eventsPrev.map(p =>
+            (p.operationalDate || p.date) === opDate
+              ? {
+                  ...p,
+                  realizedGross: truth.grossEarnings,
+                  realizedExpenses: truth.totalExpenses,
+                  realizedReserves: truth.reserves,
+                  realizedNetProfit: truth.availableCash,
+                  realizedTrips: truth.tripsCount,
+                }
+              : p
+          );
+        } else {
+          return [
+            ...eventsPrev,
+            {
+              id: 'ev-auto-' + expDate + '-' + Date.now(),
+              date: expDate,
+              operationalDate: opDate,
+              type: 'work' as PlannerEventType,
+              startTime: '06:00',
+              endTime: '14:00',
+              targetEarnings: profile.dailyGoal || 250,
+              platforms: ['Uber'],
+              notes: 'Dia sincronizado com lançamentos de despesas',
+              realizedGross: truth.grossEarnings,
+              realizedExpenses: truth.totalExpenses,
+              realizedReserves: truth.reserves,
+              realizedNetProfit: truth.availableCash,
+              realizedTrips: truth.tripsCount,
+            },
+          ];
+        }
+      });
+
+      return updatedExpenses;
     });
   };
 
   const deleteExpense = (id: string) => {
     const itemToDelete = expenses.find(e => e.id === id);
-    setExpenses(prev => prev.filter(e => e.id !== id));
-    if (itemToDelete && itemToDelete.date) {
-      const expDate = itemToDelete.date.split('T')[0];
-      setPlannerEvents(prev =>
-        prev.map(p =>
-          p.date === expDate
+    if (!itemToDelete) return;
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    const opDate = itemToDelete.operationalDate || getOperationalDate(itemToDelete.date, timezone);
+
+    setExpenses(prev => {
+      const updatedExpenses = prev.filter(e => e.id !== id);
+      const truth = calculateDayFinancialTruth(
+        opDate,
+        sessions,
+        updatedExpenses,
+        fuelRecords,
+        earnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+
+      setPlannerEvents(eventsPrev =>
+        eventsPrev.map(p =>
+          (p.operationalDate || p.date) === opDate
             ? {
                 ...p,
-                realizedExpenses: Math.max(0, (p.realizedExpenses || 0) - itemToDelete.amount),
+                realizedGross: truth.grossEarnings,
+                realizedExpenses: truth.totalExpenses,
+                realizedReserves: truth.reserves,
+                realizedNetProfit: truth.availableCash,
+                realizedTrips: truth.tripsCount,
               }
             : p
         )
       );
-    }
+
+      return updatedExpenses;
+    });
   };
 
-  // Reconciliação e sincronização profunda de todos os lançamentos históricos com o Planner
+  // Reconciliação e sincronização profunda de todos os lançamentos históricos com o Planner via Fonte da Verdade
   const syncAllLaunchesToPlanner = () => {
-    const dateMap = new Map<string, {
-      gross: number;
-      expenses: number;
-      reserves: number;
-      trips: number;
-      platforms: Set<PlatformType>;
-    }>();
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    const datesSet = new Set<string>();
 
-    // 1. Processar sessões
     sessions.forEach(s => {
-      if (!s.startTime) return;
-      const dateStr = s.startTime.split('T')[0];
-      const entry = dateMap.get(dateStr) || { gross: 0, expenses: 0, reserves: 0, trips: 0, platforms: new Set<PlatformType>() };
-      entry.gross += (s.grossEarnings || 0) + (s.tips || 0);
-      entry.expenses += (s.fuelExpenses || 0) + (s.otherExpenses || 0);
-      entry.reserves += (s.fuelReserve || 0) + (s.maintenanceReserve || 0);
-      entry.trips += (s.tripsCount || 0);
-      if (s.platformEarnings) {
-        Object.keys(s.platformEarnings).forEach(p => entry.platforms.add(p as PlatformType));
-      }
-      dateMap.set(dateStr, entry);
+      const d = s.operationalDate || getOperationalDate(s.startTime, timezone);
+      if (d) datesSet.add(d);
     });
-
-    // 2. Processar ganhos avulsos que não foram gerados por espelhamento da sessão
     earnings.forEach(e => {
-      if (!e.timestamp) return;
-      const dateStr = e.timestamp.split('T')[0];
-      const entry = dateMap.get(dateStr) || { gross: 0, expenses: 0, reserves: 0, trips: 0, platforms: new Set<PlatformType>() };
-      // Se não há sessões para a data ou se é ganho avulso sem sessionId
-      const hasSessionForDate = sessions.some(s => s.startTime && s.startTime.startsWith(dateStr));
-      if (!hasSessionForDate) {
-        entry.gross += (e.amount || 0) + (e.tip || 0);
-        entry.trips += (e.tripsCount || 1);
-      }
-      if (e.platform) entry.platforms.add(e.platform);
-      dateMap.set(dateStr, entry);
+      const d = e.operationalDate || getOperationalDate(e.timestamp, timezone);
+      if (d) datesSet.add(d);
     });
-
-    // 3. Processar despesas avulsas
     expenses.forEach(e => {
-      if (!e.date) return;
-      const dateStr = e.date.split('T')[0];
-      const entry = dateMap.get(dateStr) || { gross: 0, expenses: 0, reserves: 0, trips: 0, platforms: new Set<PlatformType>() };
-      const isSessionExpense = e.sessionId && sessions.some(s => s.id === e.sessionId);
-      if (!isSessionExpense) {
-        entry.expenses += (e.amount || 0);
-      }
-      dateMap.set(dateStr, entry);
+      const d = e.operationalDate || getOperationalDate(e.date, timezone);
+      if (d) datesSet.add(d);
+    });
+    fuelRecords.forEach(f => {
+      const d = f.operationalDate || getOperationalDate(f.date, timezone);
+      if (d) datesSet.add(d);
+    });
+    plannerEvents.forEach(p => {
+      const d = p.operationalDate || p.date;
+      if (d) datesSet.add(d);
     });
 
-    // 4. Atualiza os eventos do Planner
     setPlannerEvents(prev => {
       const updated = [...prev];
-      dateMap.forEach((metrics, dateStr) => {
-        const index = updated.findIndex(p => p.date === dateStr);
+      datesSet.forEach(dateStr => {
+        const truth = calculateDayFinancialTruth(
+          dateStr,
+          sessions,
+          expenses,
+          fuelRecords,
+          earnings,
+          profile.fuelCalculationMethod || 'hibrido',
+          timezone
+        );
+
+        const index = updated.findIndex(p => (p.operationalDate || p.date) === dateStr);
         if (index >= 0) {
           updated[index] = {
             ...updated[index],
-            realizedGross: metrics.gross,
-            realizedExpenses: metrics.expenses,
-            realizedReserves: metrics.reserves,
-            realizedTrips: metrics.trips,
-            platforms: updated[index].platforms.length > 0
-              ? updated[index].platforms
-              : (metrics.platforms.size > 0 ? Array.from(metrics.platforms) : ['Uber', '99']),
+            operationalDate: dateStr,
+            realizedGross: truth.grossEarnings,
+            realizedExpenses: truth.totalExpenses,
+            realizedReserves: truth.reserves,
+            realizedNetProfit: truth.availableCash,
+            realizedTrips: truth.tripsCount,
+            needsReview: false,
           };
-        } else if (metrics.gross > 0 || metrics.expenses > 0 || metrics.trips > 0) {
+        } else if (truth.grossEarnings > 0 || truth.totalExpenses > 0 || truth.tripsCount > 0) {
           updated.push({
             id: 'ev-sync-' + dateStr + '-' + Date.now(),
             date: dateStr,
+            operationalDate: dateStr,
             type: 'work' as PlannerEventType,
             startTime: '06:00',
             endTime: '14:00',
             targetEarnings: profile.dailyGoal || 250,
-            platforms: metrics.platforms.size > 0 ? Array.from(metrics.platforms) : ['Uber', '99'],
-            notes: 'Turno sincronizado com lançamentos',
-            realizedGross: metrics.gross,
-            realizedExpenses: metrics.expenses,
-            realizedReserves: metrics.reserves,
-            realizedTrips: metrics.trips,
+            platforms: ['Uber', '99'],
+            notes: 'Turno sincronizado com a Fonte Única da Verdade',
+            realizedGross: truth.grossEarnings,
+            realizedExpenses: truth.totalExpenses,
+            realizedReserves: truth.reserves,
+            realizedNetProfit: truth.availableCash,
+            realizedTrips: truth.tripsCount,
+            needsReview: false,
           });
         }
       });
@@ -1116,18 +1279,24 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const addFuelRecord = (fuel: Omit<FuelRecord, 'id'>) => {
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    const opDate = fuel.operationalDate || getOperationalDate(fuel.date, timezone);
     const item: FuelRecord = {
       ...fuel,
       id: 'fuel-' + Date.now(),
+      operationalDate: opDate,
     };
     setFuelRecords(prev => [item, ...prev]);
 
-    // Registrar como despesa de combustível
+    // Registrar como despesa de combustível com vinculação correta ao registro de combustível
     addExpense({
       category: 'Combustível',
       amount: fuel.totalAmount,
       description: `${fuel.liters.toFixed(1)}L de ${fuel.fuelType} @ ${fuel.stationName || 'Posto'}`,
       date: fuel.date,
+      operationalDate: opDate,
+      costType: 'movimentacao_caixa',
+      fuelRecordId: item.id,
       sessionId: activeSession?.id,
     });
 
@@ -1138,6 +1307,8 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
 
   const deleteFuelRecord = (id: string) => {
     setFuelRecords(prev => prev.filter(f => f.id !== id));
+    // Remove também a despesa vinculada para manter paridade absoluta de caixa
+    setExpenses(prev => prev.filter(e => e.fuelRecordId !== id));
   };
 
   const addMaintenance = (maint: Omit<MaintenanceRecord, 'id'>) => {
@@ -1354,8 +1525,8 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     localStorage.clear();
   };
 
-  const exportDataJSON = () => {
-    const payload = {
+  const createPreMigrationBackup = async (autoSaveLocal = true): Promise<DriverPlannerBackupPayload> => {
+    const backup = await generateDriverBackup('DriverPlanner_PreMigration_Backup', {
       profile,
       vehicle,
       sessions,
@@ -1365,17 +1536,42 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       expenses,
       fuelRecords,
       maintenances,
+      alerts,
+      strategies,
       customExpenseCategories,
-      exportedAt: new Date().toISOString(),
-      appVersion: '2.0.0',
+      dashboardCards,
+      isDemoData,
+    });
+
+    if (autoSaveLocal) {
+      saveLocalSnapshot(backup);
+    }
+    return backup;
+  };
+
+  const downloadFullBackup = async (): Promise<{
+    success: boolean;
+    filename: string;
+    sizeBytes: number;
+    totalRecords: number;
+  }> => {
+    const backup = await createPreMigrationBackup(true);
+    const result = downloadBackupFile(backup);
+    return {
+      ...result,
+      totalRecords: backup.statistics.totalRecords,
     };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `DriverPlanner_Backup_${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  };
+
+  const getLocalSnapshotData = (): DriverPlannerBackupPayload | null => {
+    return getLocalSnapshot();
+  };
+
+  const exportDataJSON = () => {
+    // Mantém compatibilidade com chamadas existentes disparando o download completo seguro
+    downloadFullBackup().catch(err => {
+      console.error('Erro ao exportar backup completo:', err);
+    });
   };
 
   const exportDataCSV = () => {
@@ -1403,25 +1599,123 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     URL.revokeObjectURL(url);
   };
 
+  /**
+   * Encerramento e Auditoria de Período (FASE E)
+   */
+  const closePeriodAccounting = (
+    params: Omit<AccountingClosing, 'id' | 'closedAt' | 'closingHash' | 'status'>
+  ): AccountingClosing => {
+    const closedAt = new Date().toISOString();
+    const randomSalt = Math.random().toString(36).substring(2, 8).toUpperCase();
+    const hashData = `${params.type}|${params.startDate}|${params.endDate}|${params.grossEarnings.toFixed(2)}|${params.totalExpenses.toFixed(2)}|${params.realNetProfit.toFixed(2)}|${closedAt}|${randomSalt}`;
+    let hashNum = 0;
+    for (let i = 0; i < hashData.length; i++) {
+      hashNum = ((hashNum << 5) - hashNum) + hashData.charCodeAt(i);
+      hashNum |= 0;
+    }
+    const closingHash = `CLOSING-${params.type.toUpperCase()}-${Math.abs(hashNum).toString(16).toUpperCase().padStart(8, '0')}-${randomSalt}`;
+
+    const newClosing: AccountingClosing = {
+      ...params,
+      id: `closing_${Date.now()}_${randomSalt.toLowerCase()}`,
+      closedAt,
+      closingHash,
+      status: 'AUDITED_AND_CLOSED',
+    };
+
+    setAccountingClosings(prev => [newClosing, ...prev.filter(c => !(c.type === params.type && c.startDate === params.startDate && c.endDate === params.endDate))]);
+    return newClosing;
+  };
+
+  const reopenPeriodAccounting = (id: string) => {
+    setAccountingClosings(prev => prev.filter(c => c.id !== id));
+  };
+
+  const exportAccountingStatementCSV = (type: 'consolidated_daily' | 'general_ledger') => {
+    let csv = '\uFEFF';
+    const tz = profile.timezone || DEFAULT_TIMEZONE;
+
+    if (type === 'consolidated_daily') {
+      csv += 'Data Operacional,Faturamento Bruto (R$),Combustivel Considerado (R$),Metodo Combustivel,Outras Despesas (R$),Total Despesas Operacionais (R$),Lucro Operacional Liquido (R$),Reservas Guardadas (R$),Caixa Livre no Bolso (R$),KM Rodados,Horas Trabalhadas,Corridas,R$/KM,R$/Hora,Status Auditoria\n';
+
+      const allDates = new Set<string>();
+      sessions.forEach(s => allDates.add(getOperationalDate(s.startTime, tz)));
+      expenses.forEach(e => allDates.add(e.operationalDate || e.date));
+      fuelRecords.forEach(f => allDates.add(f.operationalDate || f.date));
+      earnings.forEach(earn => allDates.add(getOperationalDate(earn.timestamp, tz)));
+
+      const sortedDates = Array.from(allDates).sort();
+      sortedDates.forEach(dateStr => {
+        const dayTruth = calculateDayFinancialTruth(
+          dateStr,
+          sessions,
+          expenses,
+          fuelRecords,
+          earnings,
+          profile.fuelCalculationMethod || 'hibrido',
+          tz
+        );
+
+        csv += `${dayTruth.operationalDate},${dayTruth.grossEarnings.toFixed(2)},${dayTruth.fuelExpenses.toFixed(2)},${dayTruth.fuelExpenseMethodUsed},${dayTruth.otherExpenses.toFixed(2)},${dayTruth.totalExpenses.toFixed(2)},${dayTruth.netProfit.toFixed(2)},${dayTruth.reserves.toFixed(2)},${dayTruth.availableCash.toFixed(2)},${dayTruth.distanceKm.toFixed(1)},${dayTruth.durationHours.toFixed(2)},${dayTruth.tripsCount},${dayTruth.kmRateGross.toFixed(2)},${dayTruth.hourlyRateGross.toFixed(2)},${dayTruth.hasDivergenceDetected ? 'DIVERGENCIA_CORRIGIDA' : 'AUDITADO_OK'}\n`;
+      });
+    } else {
+      csv += 'Data,Centro de Custo,Natureza,Categoria / Origem,Descricao,Valor (R$),KM Ocorrencia,Documento / ID Integridade\n';
+
+      // 1. Receitas
+      sessions.forEach(s => {
+        const date = s.startTime.split('T')[0];
+        const gross = s.grossEarnings + s.tips;
+        if (gross > 0) {
+          csv += `${date},"Receita Operacional","Entrada","Turno / Sessao","Faturamento de Trabalho",${gross.toFixed(2)},${s.endOdometer || 0},"SESS-${s.id.substring(0, 8)}"\n`;
+        }
+      });
+
+      // 2. Custos de Combustível Físico (Movimentação de Caixa)
+      fuelRecords.forEach(f => {
+        csv += `${f.date},"Movimentacao de Caixa Posto","Saida","Combustivel","Abastecimento no Posto (${f.liters.toFixed(1)}L)",-${f.totalAmount.toFixed(2)},${f.odometer || 0},"POSTO-${f.id.substring(0, 8)}"\n`;
+      });
+
+      // 3. Despesas Operacionais / Custos Fixos
+      expenses.forEach(e => {
+        const costCenter = e.costCenter || (['Seguro', 'IPVA', 'Licenciamento', 'Financiamento'].includes(e.category) ? 'custo_fixo' : 'custo_operacional_direto');
+        const costCenterLabel = costCenter === 'custo_fixo' ? 'Custo Fixo do Veículo' : 'Custo Operacional Direto';
+        csv += `${e.date},"${costCenterLabel}","Saida","${e.category}","${(e.description || '').replace(/"/g, '""')}",-${e.amount.toFixed(2)},${e.odometer || 0},"EXP-${e.id.substring(0, 8)}"\n`;
+      });
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `DriverPlanner_${type === 'consolidated_daily' ? 'Extrato_Diario_Consolidado' : 'Livro_Caixa_Centros_Custo'}_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const importDataJSON = (jsonStr: string): boolean => {
     try {
       const data = JSON.parse(jsonStr);
-      if (data.profile) setProfile(data.profile);
-      if (data.vehicle) setVehicle(data.vehicle);
-      if (data.sessions) setSessions(data.sessions);
-      if (data.plannerEvents) setPlannerEvents(data.plannerEvents);
-      if (data.recurringSchedule) setRecurringScheduleState(data.recurringSchedule);
-      if (data.earnings) setEarnings(data.earnings);
-      if (data.expenses) setExpenses(data.expenses);
-      if (data.fuelRecords) setFuelRecords(data.fuelRecords);
-      if (data.maintenances) setMaintenances(data.maintenances);
-      if (Array.isArray(data.customExpenseCategories)) {
-        setCustomExpenseCategories(data.customExpenseCategories);
+      // Suporta tanto o novo formato com data.entities quanto o formato legado direto
+      const src = data.entities ? data.entities : data;
+
+      if (src.profile) setProfile(src.profile);
+      if (src.vehicle) setVehicle(src.vehicle);
+      if (src.sessions) setSessions(src.sessions);
+      if (src.plannerEvents) setPlannerEvents(src.plannerEvents);
+      if (src.recurringSchedule) setRecurringScheduleState(src.recurringSchedule);
+      if (src.earnings) setEarnings(src.earnings);
+      if (src.expenses) setExpenses(src.expenses);
+      if (src.fuelRecords) setFuelRecords(src.fuelRecords);
+      if (src.maintenances) setMaintenances(src.maintenances);
+      if (src.alerts && Array.isArray(src.alerts)) setAlerts(src.alerts);
+      if (src.strategies && Array.isArray(src.strategies)) setStrategies(src.strategies);
+      if (Array.isArray(src.customExpenseCategories)) {
+        setCustomExpenseCategories(src.customExpenseCategories);
       }
-      if (Array.isArray(data.dashboardCards)) {
-        setDashboardCards(data.dashboardCards);
-      } else if (Array.isArray(data.profile?.dashboardCards)) {
-        setDashboardCards(data.profile.dashboardCards);
+      if (Array.isArray(src.dashboardCards)) {
+        setDashboardCards(src.dashboardCards);
+      } else if (Array.isArray(src.profile?.dashboardCards)) {
+        setDashboardCards(src.profile.dashboardCards);
       }
       setIsDemoData(false);
       return true;
@@ -1429,6 +1723,61 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
       return false;
     }
   };
+
+  const reconcilePlannerData = () => {
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    const { reconciledEvents, divergencesFound } = auditAndReconcilePlannerEvents(
+      plannerEvents,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      timezone
+    );
+    if (divergencesFound.length > 0) {
+      setPlannerEvents(reconciledEvents);
+    }
+    return { count: divergencesFound.length, divergences: divergencesFound };
+  };
+
+  const getDayFinancialTruth = (dateStr: string): DayFinancialSummary => {
+    const timezone = profile.timezone || DEFAULT_TIMEZONE;
+    return calculateDayFinancialTruth(
+      dateStr,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      timezone
+    );
+  };
+
+  const fuelCalculationMethod: FuelCalculationMethod = profile.fuelCalculationMethod || 'hibrido';
+
+  const setFuelCalculationMethod = (method: FuelCalculationMethod) => {
+    updateProfile({ fuelCalculationMethod: method });
+  };
+
+  // Auditoria e reconciliação automática não-destrutiva ao iniciar
+  useEffect(() => {
+    if (plannerEvents.length > 0) {
+      const timezone = profile.timezone || DEFAULT_TIMEZONE;
+      const { reconciledEvents, divergencesFound } = auditAndReconcilePlannerEvents(
+        plannerEvents,
+        sessions,
+        expenses,
+        fuelRecords,
+        earnings,
+        profile.fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+      if (divergencesFound.length > 0) {
+        setPlannerEvents(reconciledEvents);
+      }
+    }
+  }, []);
 
   return (
     <DriverContext.Provider
@@ -1466,6 +1815,10 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         applyRecurringScheduleToRange,
         duplicateScheduleToWeek,
         syncAllLaunchesToPlanner,
+        reconcilePlannerData,
+        getDayFinancialTruth,
+        fuelCalculationMethod,
+        setFuelCalculationMethod,
         addEarning,
         deleteEarning,
         addExpense,
@@ -1482,6 +1835,9 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         exportDataJSON,
         exportDataCSV,
         importDataJSON,
+        createPreMigrationBackup,
+        downloadFullBackup,
+        getLocalSnapshotData,
         expenseCategories,
         customExpenseCategories,
         addCustomExpenseCategory,
@@ -1492,6 +1848,10 @@ export const DriverProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         toggleDashboardCard,
         reorderDashboardCards,
         resetDashboardCards,
+        accountingClosings,
+        closePeriodAccounting,
+        reopenPeriodAccounting,
+        exportAccountingStatementCSV,
       }}
     >
       {children}

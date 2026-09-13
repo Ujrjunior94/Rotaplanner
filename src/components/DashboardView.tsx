@@ -1,12 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useDriver } from '../context/DriverContext';
-import { DashboardCardId } from '../types';
+import { DashboardCardId, FuelCalculationMethod } from '../types';
 import {
   formatCurrency,
   formatKm,
   formatHours,
+  formatTimer,
   safeDivide,
 } from '../utils/calc';
+import { calculateDayFinancialTruth } from '../utils/financialTruth';
+import { getOperationalDate, DEFAULT_TIMEZONE } from '../utils/timezone';
 import { FuelAdvisorCard } from './FuelAdvisorCard';
 import { SanderoFuelGaugeCard } from './SanderoFuelGaugeCard';
 import { WeeklyGoalCard } from './WeeklyGoalCard';
@@ -31,6 +34,11 @@ import {
   Wallet,
   ShieldCheck,
   Sliders,
+  Play,
+  Square,
+  PlusCircle,
+  Calculator,
+  Compass,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -55,41 +63,62 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     activeSession,
     earnings,
     expenses,
+    fuelRecords,
+    fuelCalculationMethod,
+    setFuelCalculationMethod,
     loadDemoData,
     dashboardCards,
   } = useDriver();
 
   const [chartMetric, setChartMetric] = useState<'gross' | 'net' | 'trips' | 'hours'>('gross');
   const [showCustomizerModal, setShowCustomizerModal] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  // Dados de hoje
-  const todayStr = new Date().toISOString().split('T')[0];
-  const todaySessions = useMemo(() => sessions.filter(s => s.startTime.startsWith(todayStr)), [sessions, todayStr]);
-  const todayExpensesItems = useMemo(() => expenses.filter(e => e.date === todayStr), [expenses, todayStr]);
+  // Timer da sessão ativa
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    if (activeSession) {
+      const updateTimer = () => {
+        const start = new Date(activeSession.startTime).getTime();
+        const now = Date.now();
+        setElapsedSeconds(Math.max(0, Math.floor((now - start) / 1000)));
+      };
+      updateTimer();
+      timer = setInterval(updateTimer, 1000);
+    } else {
+      setElapsedSeconds(0);
+    }
+    return () => clearInterval(timer);
+  }, [activeSession]);
 
-  const todayGross = useMemo(() => {
-    const fromCompleted = todaySessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
-    const fromActive = activeSession ? activeSession.grossEarnings + activeSession.tips : 0;
-    return fromCompleted + fromActive;
-  }, [todaySessions, activeSession]);
+  // Dados de hoje integrados à Fonte Única da Verdade com suporte a timezone
+  const timezone = profile.timezone || DEFAULT_TIMEZONE;
+  const todayStr = useMemo(() => getOperationalDate(new Date(), timezone), [timezone]);
 
-  const todayExpenses = useMemo(() => {
-    const fromSessions = todaySessions.reduce((acc, s) => acc + s.fuelExpenses + s.otherExpenses, 0);
-    const fromItems = todayExpensesItems.reduce((acc, e) => acc + e.amount, 0);
-    const fromActive = activeSession ? activeSession.fuelExpenses + activeSession.otherExpenses : 0;
-    return Math.max(fromSessions, fromItems) + fromActive;
-  }, [todaySessions, todayExpensesItems, activeSession]);
+  const todayTruth = useMemo(() => {
+    return calculateDayFinancialTruth(
+      todayStr,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      fuelCalculationMethod || 'hibrido',
+      timezone
+    );
+  }, [todayStr, sessions, expenses, fuelRecords, earnings, fuelCalculationMethod, timezone]);
+
+  const activeGross = activeSession ? activeSession.grossEarnings + activeSession.tips : 0;
+  const activeExpenses = activeSession ? activeSession.fuelExpenses + activeSession.otherExpenses : 0;
+  const activeTrips = activeSession ? activeSession.tripsCount : 0;
+  const activeKm = activeSession && activeSession.startOdometer ? Math.max(0, vehicle.currentOdometer - activeSession.startOdometer) : 0;
+
+  const todayGross = todayTruth.grossEarnings + activeGross;
+  const todayExpenses = todayTruth.totalExpenses + activeExpenses;
 
   // Reservas estratégicas para abastecimento futuro e manutenção
-  const todayFuelReserve = useMemo(() => {
-    return todaySessions.reduce((acc, s) => acc + (s.fuelReserve || 0), 0);
-  }, [todaySessions]);
-
-  const todayMaintReserve = useMemo(() => {
-    return todaySessions.reduce((acc, s) => acc + (s.maintenanceReserve || 0), 0);
-  }, [todaySessions]);
-
-  const todayTotalReserves = todayFuelReserve + todayMaintReserve;
+  const todayFuelReserve = todayTruth.fuelReserve;
+  const todayMaintReserve = todayTruth.maintenanceReserve;
+  const todayTotalReserves = todayTruth.reserves;
 
   // Saldo imediato em dinheiro no bolso hoje (Bruto - Despesas Diretas desembolsadas)
   const todayImmediateBalance = todayGross - todayExpenses;
@@ -97,38 +126,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Lucro líquido real (após guardar o valor para a reserva de abastecimento futuro e manutenção)
   const todayNetProfit = todayGross - todayExpenses - todayTotalReserves;
 
-  const todayTrips = useMemo(() => {
-    const fromCompleted = todaySessions.reduce((acc, s) => acc + s.tripsCount, 0);
-    const fromActive = activeSession ? activeSession.tripsCount : 0;
-    return fromCompleted + fromActive;
-  }, [todaySessions, activeSession]);
-
-  const todayKm = useMemo(() => {
-    const fromCompleted = todaySessions.reduce((acc, s) => {
-      if (s.endOdometer && s.startOdometer) return acc + (s.endOdometer - s.startOdometer);
-      return acc;
-    }, 0);
-    return fromCompleted;
-  }, [todaySessions]);
+  const todayTrips = todayTruth.tripsCount + activeTrips;
+  const todayKm = todayTruth.distanceKm + activeKm;
 
   const todayHoursDecimal = useMemo(() => {
-    let total = todaySessions.reduce((acc, s) => {
-      if (!s.endTime) return acc;
-      return acc + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000;
-    }, 0);
+    let total = todayTruth.durationHours;
     if (activeSession) {
       const liveHours = (Date.now() - new Date(activeSession.startTime).getTime()) / 3600000;
       total += Math.max(0, liveHours);
     }
     return total;
-  }, [todaySessions, activeSession]);
+  }, [todayTruth.durationHours, activeSession]);
 
   const ratePerHour = safeDivide(todayGross, todayHoursDecimal);
   const ratePerKm = safeDivide(todayGross, todayKm);
   const costPerKm = safeDivide(todayExpenses, todayKm);
   const goalProgress = Math.min(100, Math.round(safeDivide(todayGross, profile.dailyGoal) * 100));
 
-  // Estatísticas dos últimos 7 dias para o gráfico
+  // Estatísticas dos últimos 7 dias para o gráfico via Fonte da Verdade
   const last7DaysData = useMemo(() => {
     const days: { dateStr: string; label: string; gross: number; expenses: number; reserves: number; net: number; trips: number; hours: number }[] = [];
     const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -136,32 +151,38 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split('T')[0];
+      const dateStr = getOperationalDate(d, timezone);
       const dayName = dayNames[d.getDay()];
 
-      const daySessions = sessions.filter(s => s.startTime.startsWith(dateStr));
-      const gross = daySessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
-      const exp = daySessions.reduce((acc, s) => acc + s.fuelExpenses + s.otherExpenses, 0);
-      const res = daySessions.reduce((acc, s) => acc + (s.fuelReserve || 0) + (s.maintenanceReserve || 0), 0);
-      const trips = daySessions.reduce((acc, s) => acc + s.tripsCount, 0);
-      const hours = daySessions.reduce((acc, s) => {
-        if (!s.endTime) return acc;
-        return acc + (new Date(s.endTime).getTime() - new Date(s.startTime).getTime()) / 3600000;
-      }, 0);
+      const truth = calculateDayFinancialTruth(
+        dateStr,
+        sessions,
+        expenses,
+        fuelRecords,
+        earnings,
+        fuelCalculationMethod || 'hibrido',
+        timezone
+      );
+
+      const isToday = i === 0;
+      const gross = truth.grossEarnings + (isToday && activeSession ? activeSession.grossEarnings + activeSession.tips : 0);
+      const exp = truth.totalExpenses + (isToday && activeSession ? activeSession.fuelExpenses + activeSession.otherExpenses : 0);
+      const res = truth.reserves;
+      const trips = truth.tripsCount + (isToday && activeSession ? activeSession.tripsCount : 0);
 
       days.push({
         dateStr,
-        label: i === 0 ? 'Hoje' : dayName,
+        label: isToday ? 'Hoje' : dayName,
         gross,
         expenses: exp,
         reserves: res,
         net: gross - exp - res,
         trips,
-        hours,
+        hours: truth.durationHours,
       });
     }
     return days;
-  }, [sessions]);
+  }, [sessions, expenses, fuelRecords, earnings, fuelCalculationMethod, timezone, activeSession]);
 
   // Resumo inteligente
   const summaryIntelligence = useMemo(() => {
@@ -227,69 +248,122 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     switch (cardId) {
       case 'cockpit_metrics':
         return (
-          <div key={cardId} className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-            {/* 1. GANHOS HOJE */}
-            <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-emerald-500/30 transition">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">GANHOS HOJE</span>
-                <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
-                  <DollarSign className="w-4 h-4" />
-                </div>
+          <div key={cardId} className="space-y-3">
+            {/* Seletor de Modo de Apuração de Combustível */}
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs">
+              <div className="flex items-center gap-1.5 text-slate-400 font-medium">
+                <Fuel className="w-3.5 h-3.5 text-amber-400" />
+                <span>Apuração de Combustível:</span>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-emerald-400 mt-2 tracking-tight">
-                {formatCurrency(todayGross)}
-              </div>
-              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                <span className="font-semibold text-slate-200">{todayTrips}</span> corridas realizadas
-              </div>
-            </div>
-
-            {/* 2. DESPESAS DIRETAS HOJE */}
-            <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-rose-500/30 transition">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DESPESAS DIRETAS</span>
-                <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
-                  <Fuel className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-2xl sm:text-3xl font-black text-rose-400 mt-2 tracking-tight">
-                {formatCurrency(todayExpenses)}
-              </div>
-              <div className="text-[11px] text-slate-400 mt-1">
-                Gastos pagos no turno
-              </div>
-            </div>
-
-            {/* 3. LUCRO LÍQUIDO REAL */}
-            <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-white/30 transition">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">LUCRO REAL</span>
-                <div className="w-8 h-8 rounded-xl bg-white/10 text-white flex items-center justify-center">
-                  <TrendingUp className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="text-2xl sm:text-3xl font-black text-white mt-2 tracking-tight">
-                {formatCurrency(todayNetProfit)}
-              </div>
-              <div className="text-[11px] font-bold text-emerald-400 mt-1">
-                {todayGross > 0 ? `${Math.round((todayNetProfit / todayGross) * 100)}% margem líquida real` : 'Sem lançamentos'}
+              <div className="flex items-center bg-black/40 p-0.5 rounded-lg border border-white/10 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setFuelCalculationMethod('hibrido')}
+                  className={`px-2.5 py-1 rounded-md transition font-semibold ${
+                    fuelCalculationMethod === 'hibrido'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Abastecimento no dia da compra; nos demais dias, custo estimado pelo KM rodado"
+                >
+                  Híbrido (Inteligente)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFuelCalculationMethod('real_abastecimento')}
+                  className={`px-2.5 py-1 rounded-md transition font-semibold ${
+                    fuelCalculationMethod === 'real_abastecimento'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Apenas despesas reais de notas e comprovantes no posto"
+                >
+                  Real (Posto)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFuelCalculationMethod('estimado_km')}
+                  className={`px-2.5 py-1 rounded-md transition font-semibold ${
+                    fuelCalculationMethod === 'estimado_km'
+                      ? 'bg-amber-500 text-slate-950 shadow-sm'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Custo calculado pelo consumo de KM rodados x preço do combustível"
+                >
+                  Estimado (KM)
+                </button>
               </div>
             </div>
 
-            {/* 4. TEMPO & KM */}
-            <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-amber-500/30 transition">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">TEMPO EM ROTA</span>
-                <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
-                  <Clock className="w-4 h-4" />
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+              {/* 1. GANHOS HOJE */}
+              <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-emerald-500/30 transition">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">GANHOS HOJE</span>
+                  <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <DollarSign className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-emerald-400 mt-2 tracking-tight">
+                  {formatCurrency(todayGross)}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                  <span className="font-semibold text-slate-200">{todayTrips}</span> corridas realizadas
                 </div>
               </div>
-              <div className="text-2xl sm:text-3xl font-black text-amber-400 mt-2 tracking-tight">
-                {formatHours(todayHoursDecimal)}
+
+              {/* 2. DESPESAS DIRETAS HOJE */}
+              <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-rose-500/30 transition">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">DESPESAS DIRETAS</span>
+                  <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
+                    <Fuel className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-rose-400 mt-2 tracking-tight">
+                  {formatCurrency(todayExpenses)}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1">
+                  Gastos operacionais no dia
+                </div>
               </div>
-              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
-                <Navigation className="w-3 h-3 text-slate-500" />
-                <span className="font-semibold text-slate-200">{formatKm(todayKm)}</span> rodados
+
+              {/* 3. LUCRO LÍQUIDO REAL */}
+              <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-white/30 transition">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">LUCRO REAL</span>
+                  <div className="w-8 h-8 rounded-xl bg-white/10 text-white flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-white mt-2 tracking-tight">
+                  {formatCurrency(todayNetProfit)}
+                </div>
+                <div className="text-[11px] text-slate-300 mt-1 flex flex-col gap-0.5">
+                  <span className="font-bold text-emerald-400">
+                    {todayGross > 0 ? `${Math.round((todayNetProfit / todayGross) * 100)}% margem real` : 'Sem lançamentos'}
+                  </span>
+                  <span className="text-[10px] text-sky-300">
+                    Disponível no bolso: {formatCurrency(todayImmediateBalance)}
+                  </span>
+                </div>
+              </div>
+
+              {/* 4. TEMPO & KM */}
+              <div className="bg-white/5 backdrop-blur-lg border border-white/10 p-4 sm:p-5 rounded-2xl relative overflow-hidden group hover:border-amber-500/30 transition">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">TEMPO EM ROTA</span>
+                  <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+                    <Clock className="w-4 h-4" />
+                  </div>
+                </div>
+                <div className="text-2xl sm:text-3xl font-black text-amber-400 mt-2 tracking-tight">
+                  {formatHours(todayHoursDecimal)}
+                </div>
+                <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                  <Navigation className="w-3 h-3 text-slate-500" />
+                  <span className="font-semibold text-slate-200">{formatKm(todayKm)}</span> rodados
+                </div>
               </div>
             </div>
           </div>
@@ -298,27 +372,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       case 'reserves_wallet':
         if (todayTotalReserves <= 0) return null;
         return (
-          <div key={cardId} className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center flex-shrink-0">
-                <PiggyBank className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-xs font-black text-amber-200 uppercase tracking-wide flex items-center gap-2 flex-wrap">
-                  <span>Reserva para Abastecimento Futuro: {formatCurrency(todayFuelReserve)}</span>
-                  {todayMaintReserve > 0 && (
-                    <span className="text-sky-300 font-bold">• Manutenção: {formatCurrency(todayMaintReserve)}</span>
-                  )}
+          <div key={cardId} className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 sm:p-4 flex flex-col gap-2.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-300 flex items-center justify-center flex-shrink-0">
+                  <PiggyBank className="w-4 h-4" />
                 </div>
-                <p className="text-[11px] text-slate-300">
-                  Valor separado dos ganhos de hoje para cobrir o próximo abastecimento sem desfalcar seu lucro.
-                </p>
+                <div>
+                  <div className="text-xs font-black text-amber-200 uppercase tracking-wide flex items-center gap-2 flex-wrap">
+                    <span>Reserva para Abastecimento: {formatCurrency(todayFuelReserve)}</span>
+                    {todayMaintReserve > 0 && (
+                      <span className="text-sky-300 font-bold">• Reserva Manutenção: {formatCurrency(todayMaintReserve)}</span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    Valor separado dos ganhos de hoje para cobrir o próximo abastecimento sem desfalcar seu lucro.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 self-start sm:self-auto">
+                <Wallet className="w-3.5 h-3.5 text-sky-400" />
+                <span className="text-[11px] text-slate-300">Disponível Imediato em Mãos:</span>
+                <strong className="text-xs font-black text-white font-mono">{formatCurrency(todayImmediateBalance)}</strong>
               </div>
             </div>
-            <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 self-start sm:self-auto">
-              <Wallet className="w-3.5 h-3.5 text-sky-400" />
-              <span className="text-[11px] text-slate-300">Saldo imediato em mãos:</span>
-              <strong className="text-xs font-black text-white font-mono">{formatCurrency(todayImmediateBalance)}</strong>
+
+            {/* Fórmula Explícita e Transparente */}
+            <div className="pt-2 border-t border-amber-500/15 flex flex-wrap items-center justify-between gap-1 text-[10px] text-slate-400 font-mono">
+              <span>
+                Faturamento ({formatCurrency(todayGross)}) - Custos ({formatCurrency(todayExpenses)}) - Reservas ({formatCurrency(todayTotalReserves)}) = <strong className="text-sky-300 font-bold">{formatCurrency(todayImmediateBalance)}</strong>
+              </span>
+              <span className="text-amber-300/80 italic font-sans text-[10px]">
+                * Disponível imediato não significa necessariamente lucro contábil.
+              </span>
             </div>
           </div>
         );
@@ -548,23 +634,151 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const visibleCards = dashboardCards.filter(c => c.visible);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
+      {/* 1. COCKPIT OPERACIONAL HERO HEADER (ONDE ESTOU? O QUE ESTOU FAZENDO? AÇÃO PRINCIPAL) */}
+      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 sm:p-6 shadow-xl relative overflow-hidden">
+        {/* Glow sutil */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 relative z-10">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                {new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
+              </span>
+              {activeSession ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-black animate-pulse">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  TURNO ATIVO
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700 text-xs font-bold">
+                  <span className="w-2 h-2 rounded-full bg-slate-400" />
+                  FORA DE TURNO
+                </span>
+              )}
+            </div>
+
+            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+              {activeSession ? 'Cockpit em Operação' : 'Pronto para Rodar?'}
+            </h2>
+            <p className="text-xs text-slate-400 max-w-xl">
+              {activeSession
+                ? `Expediente iniciado às ${new Date(activeSession.startTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })} • Tempo decorrido: ${formatTimer(elapsedSeconds)}`
+                : 'Inicie seu turno para monitorar ganhos, consumo do Sandero e métricas em tempo real.'}
+            </p>
+          </div>
+
+          {/* BOTÕES DE AÇÃO PRINCIPAL IMEDIATA */}
+          <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap">
+            {activeSession ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onOpenQuickModal()}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs sm:text-sm shadow-lg shadow-emerald-500/20 transition active:scale-95"
+                >
+                  <PlusCircle className="w-4 h-4 stroke-[2.5]" />
+                  <span>+ Ganho</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={onOpenShiftModal}
+                  className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-rose-300 hover:text-rose-200 font-black text-xs sm:text-sm border border-slate-700 transition active:scale-95"
+                >
+                  <Square className="w-4 h-4 fill-current" />
+                  <span>Encerrar Turno</span>
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={onOpenShiftModal}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-sm shadow-xl shadow-emerald-500/25 transition active:scale-95"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>INICIAR TURNO AGORA</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ATALHOS RÁPIDOS DE 1 TOQUE */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-4 mt-4 border-t border-slate-800/80">
+          <button
+            type="button"
+            onClick={() => onOpenQuickModal()}
+            className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-left border border-slate-700/60 transition group flex items-center gap-2.5"
+          >
+            <div className="w-7 h-7 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center shrink-0">
+              <DollarSign className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-xs font-black text-white group-hover:text-emerald-300 block truncate">Lançar Ganho</span>
+              <span className="text-[10px] text-slate-400 block truncate">Uber, 99, inDrive</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenQuickFuel}
+            className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-left border border-slate-700/60 transition group flex items-center gap-2.5"
+          >
+            <div className="w-7 h-7 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center shrink-0">
+              <Fuel className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-xs font-black text-white group-hover:text-amber-300 block truncate">Abastecer</span>
+              <span className="text-[10px] text-slate-400 block truncate">Litros & Odômetro</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('analyzer')}
+            className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-left border border-slate-700/60 transition group flex items-center gap-2.5"
+          >
+            <div className="w-7 h-7 rounded-lg bg-teal-500/10 text-teal-400 flex items-center justify-center shrink-0">
+              <Calculator className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-xs font-black text-white group-hover:text-teal-300 block truncate">Analisar Corrida</span>
+              <span className="text-[10px] text-slate-400 block truncate">Score 0-100 em 3s</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onNavigateTab('planner')}
+            className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-800 text-left border border-slate-700/60 transition group flex items-center gap-2.5"
+          >
+            <div className="w-7 h-7 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center shrink-0">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-xs font-black text-white group-hover:text-sky-300 block truncate">Planner Semanal</span>
+              <span className="text-[10px] text-slate-400 block truncate">Escalas & Metas</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* BARRA SUPERIOR DE PERSONALIZAÇÃO E STATUS DO PAINEL */}
-      <div className="flex items-center justify-between gap-3 bg-white/5 backdrop-blur-lg border border-white/10 px-4 py-2.5 rounded-2xl">
+      <div className="flex items-center justify-between gap-3 bg-slate-900/60 border border-slate-800 px-4 py-2 rounded-2xl">
         <div className="flex items-center gap-2">
           <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-xs font-bold text-slate-300">
-            Painel Personalizado • <strong className="text-emerald-400 font-black">{visibleCards.length}</strong> de {dashboardCards.length} cards ativos
+            Cockpit Modular • <strong className="text-emerald-400 font-black">{visibleCards.length}</strong> de {dashboardCards.length} módulos ativos
           </span>
         </div>
         <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCustomizerModal(true)}
-            className="flex items-center gap-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 hover:text-emerald-200 px-3 py-1.5 rounded-xl text-xs font-bold border border-emerald-500/30 transition shadow-sm active:scale-95"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold border border-slate-700 transition active:scale-95"
             title="Personalizar quais cards aparecem e a sua ordem no painel"
           >
             <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Personalizar Cards</span>
+            <span>Personalizar</span>
           </button>
         </div>
       </div>

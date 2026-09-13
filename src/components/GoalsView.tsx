@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useDriver } from '../context/DriverContext';
 import { formatCurrency, safeDivide } from '../utils/calc';
-import { Target, Award, Calendar, TrendingUp, CheckCircle, Edit2, AlertCircle } from 'lucide-react';
+import { Target, Award, Calendar, TrendingUp, CheckCircle, Edit2, AlertCircle, ShieldCheck } from 'lucide-react';
+import { calculateRangeFinancialTruth, calculateDayFinancialTruth } from '../utils/financialTruth';
+import { getOperationalDate, DEFAULT_TIMEZONE } from '../utils/timezone';
 
 export const GoalsView: React.FC = () => {
-  const { profile, updateProfile, sessions } = useDriver();
+  const { profile, updateProfile, sessions, expenses, fuelRecords, earnings } = useDriver();
 
   const [isEditing, setIsEditing] = useState(false);
   const [daily, setDaily] = useState(profile.dailyGoal.toString());
@@ -23,23 +25,40 @@ export const GoalsView: React.FC = () => {
     setIsEditing(false);
   };
 
+  const tz = profile.timezone || DEFAULT_TIMEZONE;
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonth = now.getMonth();
-  const todayStr = now.toISOString().split('T')[0];
+  const todayOpDate = getOperationalDate(now.toISOString(), tz);
 
   // Cálculos do mês atual
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const currentDayOfMonth = now.getDate();
   const remainingDaysInMonth = Math.max(1, daysInMonth - currentDayOfMonth);
 
-  // Mês atual sessões
-  const monthlySessions = sessions.filter(s => {
-    const d = new Date(s.startTime);
-    return d.getFullYear() === currentYear && d.getMonth() === currentMonth;
-  });
+  // Mês atual via Fonte Única da Verdade
+  const monthDateStrings = useMemo(() => {
+    const dates: string[] = [];
+    for (let d = 1; d <= daysInMonth; d++) {
+      dates.push(`${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`);
+    }
+    return dates;
+  }, [currentYear, currentMonth, daysInMonth]);
 
-  const monthGross = monthlySessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
+  const monthTruth = useMemo(() => {
+    return calculateRangeFinancialTruth(
+      monthDateStrings,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      tz
+    );
+  }, [monthDateStrings, sessions, expenses, fuelRecords, earnings, profile.fuelCalculationMethod, tz]);
+
+  const monthGross = monthTruth.grossTotal;
+  const monthNet = monthTruth.netProfitTotal;
   const monthRemaining = Math.max(0, profile.monthlyGoal - monthGross);
   const neededPerDay = safeDivide(monthRemaining, remainingDaysInMonth);
   const monthProgress = Math.min(100, Math.round(safeDivide(monthGross, profile.monthlyGoal) * 100));
@@ -48,18 +67,46 @@ export const GoalsView: React.FC = () => {
   const dailyAverageSoFar = safeDivide(monthGross, Math.max(1, currentDayOfMonth));
   const projectedMonthEnd = monthGross + (dailyAverageSoFar * remainingDaysInMonth);
 
-  // Semana atual
-  const currentWeekSessions = sessions.filter(s => {
-    const d = new Date(s.startTime);
-    const diff = Math.floor((now.getTime() - d.getTime()) / (1000 * 3600 * 24));
-    return diff >= 0 && diff < 7;
-  });
-  const weekGross = currentWeekSessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
+  // Semana atual (últimos 7 dias)
+  const weekDateStrings = useMemo(() => {
+    const dates: string[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      dates.push(getOperationalDate(d.toISOString(), tz));
+    }
+    return dates;
+  }, [tz]);
+
+  const weekTruth = useMemo(() => {
+    return calculateRangeFinancialTruth(
+      weekDateStrings,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      tz
+    );
+  }, [weekDateStrings, sessions, expenses, fuelRecords, earnings, profile.fuelCalculationMethod, tz]);
+
+  const weekGross = weekTruth.grossTotal;
   const weekProgress = Math.min(100, Math.round(safeDivide(weekGross, profile.weeklyGoal) * 100));
 
-  // Hoje
-  const todaySessions = sessions.filter(s => s.startTime.startsWith(todayStr));
-  const todayGross = todaySessions.reduce((acc, s) => acc + s.grossEarnings + s.tips, 0);
+  // Hoje via Fonte Única da Verdade
+  const todayTruth = useMemo(() => {
+    return calculateDayFinancialTruth(
+      todayOpDate,
+      sessions,
+      expenses,
+      fuelRecords,
+      earnings,
+      profile.fuelCalculationMethod || 'hibrido',
+      tz
+    );
+  }, [todayOpDate, sessions, expenses, fuelRecords, earnings, profile.fuelCalculationMethod, tz]);
+
+  const todayGross = todayTruth.grossEarnings;
   const todayProgress = Math.min(100, Math.round(safeDivide(todayGross, profile.dailyGoal) * 100));
 
   return (

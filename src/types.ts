@@ -2,24 +2,93 @@ export type PlatformType = 'Uber' | '99' | 'inDrive' | 'Particular' | 'Outro';
 
 export type PlannerEventType = 'work' | 'off' | 'goal' | 'maintenance' | 'appointment' | 'other';
 
+/**
+ * Centros de Custo (FASE D - Item 8)
+ * Distingue a natureza contábil e operacional de cada saída financeira
+ */
+export type CostCenterType =
+  | 'custo_operacional_direto' // relacionado diretamente ao turno (combustível consumido, pedágio, alimentação, etc.)
+  | 'custo_fixo'                // relacionado ao veículo/mês (seguro, IPVA, licenciamento, financiamento)
+  | 'reserva'                   // dinheiro separado preventivamente (combustível, manutenção, emergência)
+  | 'movimentacao_caixa';        // saída imediata de caixa (compra/abastecimento no posto)
+
+/**
+ * Métodos de Cálculo do Custo de Combustível (FASE D - Item 7)
+ * Evita rigorosamente a duplicidade entre compra no posto e consumo em KM
+ */
+export type FuelCalculationMethod =
+  | 'real_abastecimento' // Método 1: Custo real por abastecimento
+  | 'estimado_km'        // Método 2: Custo estimado por km rodado
+  | 'hibrido';           // Método 3: Modelo híbrido (abastecimento real se houver no dia, senão estimado por km)
+
 export type ExpenseCategory =
   | 'Combustível'
+  | 'Pedágio'
+  | 'Estacionamento'
+  | 'Lavagem'
   | 'Manutenção'
   | 'Pneus'
+  | 'Seguro'
+  | 'IPVA'
+  | 'Licenciamento'
+  | 'Financiamento'
+  | 'Alimentação'
   | 'Óleo'
   | 'Freios'
   | 'Documentação'
-  | 'Seguro'
-  | 'IPVA'
-  | 'Alimentação'
-  | 'Estacionamento'
-  | 'Pedágio'
   | 'Internet'
-  | 'Lavagem'
   | 'Limpeza'
   | 'Multas'
   | 'Outros'
   | (string & {});
+
+/**
+ * Registro de Reserva Financeira Estruturada (FASE D - Item 9)
+ */
+export interface ReserveItem {
+  id: string;
+  type: 'combustivel' | 'manutencao' | 'emergencia';
+  amount: number;
+  origin: 'sessao' | 'manual' | 'regra_km';
+  date: string;
+  operationalDate?: string;
+  sessionId?: string;
+  status: 'ativo' | 'utilizado' | 'liberado';
+  notes?: string;
+  balanceAfter?: number;
+}
+
+/**
+ * Fechamento Periódico Contábil e Auditoria de Exercício (FASE E)
+ * Garante a imutabilidade e comprovação fiscal/contábil de períodos encerrados
+ */
+export interface AccountingClosing {
+  id: string;
+  type: 'weekly' | 'monthly';
+  periodLabel: string;
+  startDate: string; // YYYY-MM-DD
+  endDate: string;   // YYYY-MM-DD
+  closedAt: string;  // ISO timestamp
+  closingHash: string; // Identificador único de integridade
+  grossEarnings: number;
+  fuelExpenses: number;
+  fuelCalculationMethod: FuelCalculationMethod;
+  otherExpenses: number;
+  directOperatingCosts: number;
+  fixedCostsProportional: number;
+  totalExpenses: number;
+  contributionMargin: number; // grossEarnings - directOperatingCosts
+  realNetProfit: number;      // grossEarnings - (directOperatingCosts + fixedCostsProportional)
+  reservesAllocated: number;  // total guardado em reservas
+  availableCash: number;      // saldo líquido livre no bolso
+  totalKm: number;
+  totalHours: number;
+  totalTrips: number;
+  ratePerKm: number;
+  ratePerHour: number;
+  status: 'AUDITED_AND_CLOSED';
+  notes?: string;
+}
 
 export type MaintenanceCategory =
   | 'Troca de Óleo'
@@ -63,6 +132,9 @@ export interface UserProfile {
   minAcceptableRateKm: number; // ex: R$ 2.00
   minAcceptableRateHour: number; // ex: R$ 35.00
   gasPriceReference: number; // ex: R$ 5.89
+  fuelCalculationMethod?: FuelCalculationMethod; // FASE D: 'real_abastecimento' | 'estimado_km' | 'hibrido'
+  emergencyReserveBalance?: number; // Saldo acumulado de emergência
+  timezone?: string; // Fuso horário operacional do motorista (padrão 'America/Bahia')
   platforms: PlatformType[];
   darkMode: boolean;
   onboardingCompleted: boolean;
@@ -95,6 +167,8 @@ export interface Vehicle {
 
 export interface WorkSession {
   id: string;
+  operationalDate?: string; // Data operacional YYYY-MM-DD
+  timezone?: string;
   startTime: string; // ISO string
   endTime: string | null;
   startOdometer: number;
@@ -103,17 +177,22 @@ export interface WorkSession {
   grossEarnings: number;
   tips: number;
   tripsCount: number;
-  fuelExpenses: number; // Despesa com abastecimento imediato no turno (se abasteceu no posto)
+  distanceKm?: number;
+  fuelExpenses: number; // Despesa com combustível estimada/consumida no turno
   otherExpenses: number; // Despesas diretas imediatas (alimentação, pedágio, etc.)
   fuelReserve?: number; // Valor a por na reserva para abastecimento futuro
   maintenanceReserve?: number; // Valor a por na reserva para manutenção preventiva
   platformEarnings?: Partial<Record<PlatformType, { amount: number; trips: number }>>;
   notes?: string;
+  needsReview?: boolean;
 }
 
 export interface PlannerEvent {
   id: string;
   date: string; // YYYY-MM-DD
+  operationalDate?: string; // Data operacional YYYY-MM-DD
+  timezone?: string;
+  sessionId?: string; // Vínculo 1:1 com a sessão de trabalho correspondente
   type: PlannerEventType;
   startTime?: string; // HH:mm
   endTime?: string; // HH:mm
@@ -124,7 +203,9 @@ export interface PlannerEvent {
   realizedGross?: number;
   realizedExpenses?: number;
   realizedReserves?: number;
+  realizedNetProfit?: number;
   realizedTrips?: number;
+  needsReview?: boolean;
 }
 
 export interface RecurringScheduleDay {
@@ -140,6 +221,7 @@ export interface RecurringScheduleDay {
 export interface EarningItem {
   id: string;
   sessionId?: string;
+  operationalDate?: string;
   platform: PlatformType;
   amount: number;
   tip: number;
@@ -153,10 +235,14 @@ export interface EarningItem {
 export interface ExpenseItem {
   id: string;
   sessionId?: string;
+  fuelRecordId?: string; // Vínculo com abastecimento físico para evitar duplicidade
   category: ExpenseCategory;
+  costType?: CostCenterType; // Centro de custo
   amount: number;
   description: string;
   date: string; // YYYY-MM-DD
+  operationalDate?: string;
+  needsReview?: boolean;
 }
 
 export interface FuelRecord {
@@ -166,8 +252,12 @@ export interface FuelRecord {
   liters: number;
   pricePerLiter: number;
   totalAmount: number;
+  totalCost?: number; // Compatibilidade com calculadoras
   odometer: number;
   date: string; // YYYY-MM-DD
+  operationalDate?: string;
+  sessionId?: string;
+  expenseId?: string; // Vínculo com a saída de caixa lançada
   isFullTank?: boolean;
   notes?: string;
 }
@@ -202,6 +292,21 @@ export interface RideAnalysis {
   marginPercent: number;
   status: 'EXCELLENT' | 'FAIR' | 'BAD';
   recommendation: string;
+  // Fase F: Inteligência Multicritério e Decisão Operacional
+  score?: number; // Pontuação de atratividade de 0 a 100
+  deadheadKm?: number; // KM de deslocamento vazio / retorno considerado
+  totalDistanceWithDeadhead?: number; // Distância total (ida + retorno)
+  effectiveRatePerKm?: number; // R$/KM real considerando retorno vazio
+  effectiveRatePerHour?: number; // R$/Hora real considerando tempo de retorno
+  netPerHour?: number; // Lucro líquido real por hora
+  platformEstimates?: Partial<Record<PlatformType, {
+    gross: number;
+    platformFeePercent: number;
+    platformFeeAmount: number;
+    netProfit: number;
+    hourlyNet: number;
+    highlight?: string;
+  }>>;
 }
 
 export type StrategyCategory =
